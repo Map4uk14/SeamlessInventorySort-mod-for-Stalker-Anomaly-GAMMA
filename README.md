@@ -68,7 +68,7 @@ The re-sort (`soft_resort`) does **not** rebuild the container. It **repositions
 
 A position-aware fingerprint guards against redundant re-sorts.
 
-**Favorite / junk** toggles are handled separately: they change an item's sort order without moving any cell, so the refresh hooks never see a layout change. SortingPlus signals them through `rax_icon_layers.refresh`, which this mod hooks to run the same `soft_resort` (unconditionally, since the fingerprint is unchanged) — replacing SortingPlus' stock full-rebuild `On_Sort` with the seamless in-place re-sort.
+**Favorite / junk** toggles are handled separately: they change an item's sort order without moving any cell, so the refresh hooks never see a layout change. SortingPlus signals them through `rax_icon_layers.refresh`, which this mod hooks to run the same `soft_resort` (unconditionally, since the fingerprint is unchanged, and regardless of SortingPlus' RESORT setting) — replacing the stock full-rebuild `On_Sort` with the seamless in-place re-sort.
 
 **Trade is SOFT-ONLY** — trade containers are never `Reinit`'d. A trade `Reinit` would rebuild from `ParseInventory(npc)`, which still contains basketed items (they stay in the ruck until the deal is confirmed) and would re-add them to the sale bag, causing the classic duplicate / stuck-in-basket bug. Repositioning cannot do that, so it is safe.
 
