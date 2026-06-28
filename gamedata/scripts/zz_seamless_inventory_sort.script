@@ -290,16 +290,20 @@ local function resort_all_shown(self)
 end
 
 -- SortingPlus calls rax_icon_layers.refresh(RESORT and 1) on every fav/junk
--- toggle: mode == 1 (RESORT on) means "re-sort", which stock does via a full
--- On_Sort rebuild (blink). We intercept that and do a seamless soft re-sort
--- instead. mode == nil (RESORT off) is icon-only -- left to the stock path.
+-- toggle -- and ONLY there. So we re-sort in place on every call, regardless of
+-- the RESORT setting: with RESORT on, stock would do a full On_Sort rebuild
+-- (blink) which we replace; with RESORT off, stock would only redraw icons and
+-- leave the item where it was -- which is the very thing we are fixing. The
+-- pcall makes a re-sort failure fall back to the stock refresh instead of
+-- breaking the toggle.
 if rax_icon_layers and rax_icon_layers.refresh then
     local orig_refresh = rax_icon_layers.refresh
     function rax_icon_layers.refresh(mode)
-        if mode == 1 then
-            local self = GetActorMenu()
-            if self and resort_all_shown(self) then
-                return  -- reordered in place; skip the stock rebuild
+        local self = GetActorMenu()
+        if self then
+            local ok, handled = pcall(resort_all_shown, self)
+            if ok and handled then
+                return  -- reordered in place; skip the stock refresh/rebuild
             end
         end
         return orig_refresh(mode)
