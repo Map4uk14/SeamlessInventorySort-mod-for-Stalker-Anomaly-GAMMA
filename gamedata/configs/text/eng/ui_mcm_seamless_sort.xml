@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="windows-1251"?>
+
+<string_table>
+
+	<!-- Menu / subgroup labels -->
+	<string id="ui_mcm_menu_seamless_sort"><text>Seamless Inventory Sort</text></string>
+	<string id="ui_mcm_menu_siss_general"><text>General</text></string>
+	<string id="ui_mcm_menu_siss_loot"><text>Looting Takes Time</text></string>
+	<string id="ui_mcm_menu_siss_hl"><text>New Loot Highlight</text></string>
+	<string id="ui_mcm_menu_siss_perf"><text>Performance</text></string>
+
+	<!-- General -->
+	<string id="ui_mcm_seamless_sort_siss_general_desc">
+		<text>Keeps a SortingPlus inventory tidy: when an item lands out of order (gun modified, item moved, traded, marked favorite/junk) it snaps back into its sorted position in place, with no flicker and without losing your scroll position.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_enable"><text>Enable</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_enable_desc">
+		<text>Master switch. When off, inventories behave like vanilla SortingPlus (items land at the end until you reopen the window).</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_fav_junk"><text>Re-sort on favorite / junk</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_fav_junk_desc">
+		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
+	</string>
+
+	<!-- Looting Takes Time -->
+	<string id="ui_mcm_seamless_sort_siss_loot_desc">
+		<text>Compatibility with the Looting Takes Time (Redux) mod, which reveals a looted body's items gradually. Only dead bodies are affected here; stashes and your own inventory always sort.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat"><text>Defer while looting</text></string>
+	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat_desc">
+		<text>While Looting Takes Time is gradually revealing a looted body, do not re-sort it so the reveal is not disturbed. Leave on if you use Looting Takes Time.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_loot_ltt_final_sort"><text>Sort body after reveal</text></string>
+	<string id="ui_mcm_seamless_sort_siss_loot_ltt_final_sort_desc">
+		<text>ON: after the reveal finishes, snap the body into sorted order once (and keep it sorted as you loot).\nOFF: never sort a looted body - it stays exactly in the order Looting Takes Time placed it, even as you take items. (Requires "Defer while looting".)</text>
+	</string>
+
+	<!-- New Loot Highlight -->
+	<string id="ui_mcm_seamless_sort_siss_hl_desc">
+		<text>Tint items you just took from a container, stash or body with a colored background, so you can see at a glance what you found. The highlight clears when you close the inventory.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new"><text>Highlight new loot</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_desc">
+		<text>Enable the new-loot highlight. Use the sliders below to choose the color.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_r"><text>Color - Red</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_r_desc"><text>Red component of the highlight color (0-255).</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_g"><text>Color - Green</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_g_desc"><text>Green component of the highlight color (0-255).</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_b"><text>Color - Blue</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_b_desc"><text>Blue component of the highlight color (0-255).</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_a"><text>Intensity</text></string>
+	<string id="ui_mcm_seamless_sort_siss_hl_hl_new_a_desc">
+		<text>Opacity of the highlight (0-255). Low values give a subtle tint; high values a strong, solid color. Default 60.</text>
+	</string>
+
+	<!-- Performance -->
+	<string id="ui_mcm_seamless_sort_siss_perf_desc">
+		<text>Anti-oscillation guard. Some items have an unstable sort key (e.g. a magazine while it is being bound) that can make a container re-sort every refresh and visibly churn. This detects that and briefly stops re-sorting so the list settles.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_guard"><text>Anti-oscillation guard</text></string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_guard_desc">
+		<text>Back off from re-sorting a container that is churning. Leave on unless troubleshooting.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_limit"><text>Re-sorts before back-off</text></string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_limit_desc">
+		<text>How many re-sorts of one container within a one-second window are allowed before the guard decides it is oscillating. Lower = more aggressive. Default 8.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_cooldown"><text>Back-off time (sec)</text></string>
+	<string id="ui_mcm_seamless_sort_siss_perf_osc_cooldown_desc">
+		<text>How long the guard stops re-sorting an oscillating container so it can settle, then seamless sorting resumes. Default 1.5 s.</text>
+	</string>
+
+</string_table>

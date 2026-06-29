@@ -1,0 +1,46 @@
+-- MCM page for Seamless Inventory Sort.
+-- Values are read in zz_seamless_inventory_sort.script via
+--   ui_mcm.get("seamless_sort/<subgroup>/<id>")
+-- MCM is optional; the script falls back to its own defaults when it is absent.
+
+local BANNER = "ui_options_slider_player"
+
+function on_mcm_load()
+    return {
+        id = "seamless_sort",
+        sh = true,
+        gr = {
+            { id = "siss_general", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_general", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_general_desc" },
+                { id = "enable",   type = "check", val = 1, def = true },
+                { id = "fav_junk", type = "check", val = 1, def = true },
+            }},
+
+            { id = "siss_loot", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_loot", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_loot_desc" },
+                { id = "ltt_compat",     type = "check", val = 1, def = true },
+                { id = "ltt_final_sort", type = "check", val = 1, def = false },
+            }},
+
+            { id = "siss_hl", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_hl", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_hl_desc" },
+                { id = "hl_new",   type = "check", val = 1, def = true },
+                { id = "hl_new_r", type = "track", val = 2, min = 0, max = 255, step = 1, def = 0 },
+                { id = "hl_new_g", type = "track", val = 2, min = 0, max = 255, step = 1, def = 210 },
+                { id = "hl_new_b", type = "track", val = 2, min = 0, max = 255, step = 1, def = 230 },
+                { id = "hl_new_a", type = "track", val = 2, min = 0, max = 255, step = 1, def = 60 },
+            }},
+
+            { id = "siss_perf", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_perf", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_perf_desc" },
+                { id = "osc_guard",    type = "check", val = 1, def = true },
+                { id = "osc_limit",    type = "track", val = 2, min = 3,   max = 20, step = 1,   def = 8 },
+                { id = "osc_cooldown", type = "track", val = 2, min = 0.5, max = 5,  step = 0.5, def = 1.5 },
+            }},
+        }
+    }
+end

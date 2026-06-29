@@ -1,55 +1,92 @@
--- zz_seamless_inventory_sort.script
---
--- Keeps inventory containers sorted whenever an item lands in one out of order:
---   * modifying a gun (attach/detach scope/holo/silencer/GL, unload a mag, any
---     "use" action) makes the engine respawn the weapon as a new object that
---     gets appended to the END of the list;
---   * moving an item between the player bag and a loot/stash/container drops it
---     at the END of the destination instead of its sorted row.
---
--- We hook the inventory REFRESH functions (IMode_/LMode_RefreshInventories) and
--- re-sort right after the stock refresh runs -- i.e. in the SAME frame the item
--- is added, before it is drawn. That is what makes it seamless: the item never
--- gets a chance to render at the end of the list (this is what fixes the
--- holographic-sight "flick to the end and back", whose weapon respawns a couple
--- frames after the detach).
---
--- Re-sort is done by soft_resort: it REPOSITIONS the existing cells into their
--- sorted slots with Set() (no Reset/Show(false) blink, stacked-item children
--- left intact, no add/remove so loot-box put/take callbacks are not tripped).
--- A last-sorted fingerprint guard means we only re-sort when the layout actually
--- changed, so a container Reinit fallback cannot loop.
---
--- Bulk stashing (Ishmaeel FastTransfer = sweep with SHIFT held): re-sorting on
--- every one of dozens of rapid moves is slow, so while shift is held we DEFER
--- and do a single re-sort once shift is released. Shift is read with key_state,
--- exactly like FastTransfer, so left AND right shift both work.
---
--- Marking an item favorite/junk (SortingPlus' K / J keys or the right-click
--- menu) changes its sort order but moves no cell, so the refresh hooks above
--- never see a layout change. SortingPlus signals these toggles through
--- rax_icon_layers.refresh; we hook that and run the SAME seamless soft_resort,
--- so favorites jump to the top and junk to the bottom in place -- without the
--- full-rebuild blink the stock RESORT path causes.
---
--- Containers handled:
---   * actor_bag / npc_bag       -- inventory & loot/stash (soft, Reinit fallback)
---   * actor_trade_bag / npc_trade_bag -- the two trade SALE BAGS, SOFT-ONLY.
---     The trade BASKETS (actor_trade / npc_trade) are left alone, and trade
---     containers are NEVER Reinit'd: a Reinit rebuilds from ParseInventory,
---     which re-adds basketed items (still in the ruck) into the sale bag -- the
---     classic duplicate / stuck-in-basket bug. soft_resort only repositions
---     existing cells, so it cannot reintroduce that.
+--[[
+    Seamless Inventory Sort
+    -----------------------
+    Companion to SortingPlus. SortingPlus orders the inventory when it opens, but
+    the engine appends an item to the END of the list whenever it is modified or
+    moved (a gun respawns on attach/detach, a looted item lands in the bottom
+    row, etc.). This script re-sorts the affected container in the same frame the
+    item is added -- before it is drawn -- so the move is never visible: no
+    flicker, no scroll jump.
 
-local last_fp   = {}  -- key -> fingerprint at last sort ("already sorted" guard)
-local rel_armed = {}  -- key -> a shift-release watcher is running
+    The re-sort (soft_resort) repositions existing cells into their sorted slots
+    rather than rebuilding the container, so there is no blink, stacked children
+    survive, and loot-box put/take callbacks are not retriggered. It is soft-only
+    by design: when an in-place sort cannot run (no SortingPlus, or a window
+    sorted by size) the order is left untouched -- never a heavy Reinit. This
+    matters most in trade, where a Reinit would re-add basketed items into the
+    sale bag (the classic duplicate / stuck-in-basket bug).
+
+    Behaviour:
+      * Inventory / loot / trade refresh        re-sort the changed bag
+      * Favorite / junk toggle (SortingPlus)    re-sort in place, no rebuild
+      * FastTransfer sweep (SHIFT held)         defer, sort once on release
+      * Oscillating sort key (e.g. Mags Redux)  back off until it settles
+      * Looting Takes Time looted bodies        leave in LTT's order
+      * Freshly looted items                    tint in the actor bag
+
+    Everything is configurable through MCM; the defaults below apply when MCM is
+    absent so the mod runs stand-alone. SortingPlus is the only hard dependency.
+--]]
+
+----------------------------------------------------------------------
+-- Settings
+----------------------------------------------------------------------
+
+local DEF = {
+    enable         = true,   -- master on/off
+    fav_junk       = true,   -- seamless re-sort on favorite/junk toggle
+    osc_guard      = true,   -- anti-oscillation back-off
+    osc_limit      = 8,      -- re-sorts per window before backing off
+    osc_cooldown   = 1.5,    -- seconds to back off an oscillating container
+    ltt_compat     = true,   -- defer to Looting Takes Time on looted bodies
+    ltt_final_sort = false,  -- false = never sort a looted body (keep LTT's order)
+    hl_new         = true,   -- tint freshly looted items in the actor bag
+    hl_new_r       = 0,      -- highlight colour, red   (0-255)
+    hl_new_g       = 210,    -- highlight colour, green (0-255)
+    hl_new_b       = 230,    -- highlight colour, blue  (0-255)
+    hl_new_a       = 60,     -- highlight intensity / alpha (0-255, low = subtle)
+}
+
+-- Each option's MCM subgroup (see zz_seamless_inventory_sort_mcm.script). Kept
+-- here so call sites stay a plain opt(id) regardless of menu layout.
+local OPT_GROUP = {
+    enable         = "siss_general", fav_junk       = "siss_general",
+    ltt_compat     = "siss_loot",    ltt_final_sort = "siss_loot",
+    hl_new         = "siss_hl",      hl_new_r       = "siss_hl",
+    hl_new_g       = "siss_hl",      hl_new_b       = "siss_hl",
+    hl_new_a       = "siss_hl",
+    osc_guard      = "siss_perf",    osc_limit      = "siss_perf",
+    osc_cooldown   = "siss_perf",
+}
+
+-- Live MCM value, or the stand-alone default when MCM is not installed.
+local function opt(id)
+    if ui_mcm then
+        local grp = OPT_GROUP[id]
+        local v = grp and ui_mcm.get("seamless_sort/" .. grp .. "/" .. id)
+        if v ~= nil then return v end
+    end
+    return DEF[id]
+end
+
+----------------------------------------------------------------------
+-- State
+----------------------------------------------------------------------
+
+local last_fp   = {}  -- sort key -> fingerprint recorded at last sort
+local rel_armed = {}  -- sort key -> a FastTransfer release watcher is running
+local ltt_armed = {}  -- sort key -> an LTT reveal watcher is running
+
+----------------------------------------------------------------------
+-- Helpers
+----------------------------------------------------------------------
 
 local function shift_held()
     return (key_state(DIK_keys.DIK_LSHIFT) ~= 0) or (key_state(DIK_keys.DIK_RSHIFT) ~= 0)
 end
 
--- Position-aware fingerprint: changes if any id is added, removed, OR moved to
--- a different cell index. (Sum over id<->indx pairs; order-independent.)
+-- Position-aware fingerprint: changes if any id is added, removed, or moved to a
+-- different cell. Order-independent sum over id<->index pairs.
 local function fingerprint(cc)
     local h = 0
     for id, indx in pairs(cc.indx_id) do
@@ -58,17 +95,156 @@ local function fingerprint(cc)
     return h
 end
 
--- True when we can re-sort a container in place. Needs only SortingPlus: a
--- "kind"-sorted container means SortingPlus is active, so GetSortMethod() returns
--- its sort_by_kind comparator and the default FindFreeCell is its kind-aware one.
+-- In-place sorting is possible only when SortingPlus is driving this container,
+-- i.e. it is sorted by "kind" (so GetSortMethod and the kind-aware FindFreeCell
+-- are installed).
 local function can_soft(cc)
     return spairs and cc.GetSortMethod and (cc.sort_method == "kind")
 end
 
--- Re-sort by moving existing cells into their sorted slots: no Reset, no blink,
--- children preserved, no item add/remove.
+----------------------------------------------------------------------
+-- Anti-oscillation guard
+----------------------------------------------------------------------
+-- Some items have an unstable sort key -- e.g. a Mags Redux magazine counts as
+-- kind "loadout" only while it is being bound, which flips frame to frame. That
+-- makes the sorted layout differ on every refresh, so we would re-sort endlessly
+-- and the list churns. If a container re-sorts more than osc_limit times within
+-- OSC_WINDOW ms we treat it as oscillating and stop sorting it for a cooldown,
+-- letting it settle (items land vanilla-style meanwhile).
+
+local OSC_WINDOW = 1000  -- ms sliding window over which re-sorts are counted
+local osc_win   = {}     -- key -> { t0 = window start ms, n = re-sort count }
+local osc_until = {}     -- key -> back off until this time_global() ms
+
+local function osc_blocked(key)
+    return (osc_until[key] or 0) > time_global()
+end
+
+local function osc_note(key)
+    if not opt("osc_guard") then return end
+    local now = time_global()
+    local w = osc_win[key]
+    if (not w) or (now - w.t0 > OSC_WINDOW) then
+        osc_win[key] = { t0 = now, n = 1 }
+    else
+        w.n = w.n + 1
+        if w.n > opt("osc_limit") then
+            osc_until[key] = now + opt("osc_cooldown") * 1000
+            osc_win[key]   = nil
+        end
+    end
+end
+
+----------------------------------------------------------------------
+-- Looting Takes Time (Redux) compatibility
+----------------------------------------------------------------------
+-- LTT reveals a looted body's items gradually and pre-places them on the grid,
+-- so re-sorting fights the reveal. We leave looted DEAD BODIES alone -- either
+-- permanently (ltt_final_sort off, the LTT author's intent) or only during the
+-- reveal, then sort once (ltt_final_sort on). Stashes, your bag, companions and
+-- trade bags are never affected.
+
+-- True while LTT is still revealing this container (any item hidden/silhouette).
+local function ltt_busy(self, cc)
+    if not opt("ltt_compat") then return false end
+    local lt = zzzz_loot_searching
+    if not (lt and lt.is_item_hidden and self.GetPartner) then return false end
+    local npc = self:GetPartner()
+    local npc_id = npc and npc:id()
+    if not npc_id then return false end
+    for id in pairs(cc.indx_id) do
+        local ok, hidden = pcall(lt.is_item_hidden, npc_id, id)
+        if ok and hidden then return true end
+    end
+    return false
+end
+
+-- True when LTT is active and this container is a looted dead body (its target).
+-- Living partners (companions/traders) and stashes/boxes are excluded.
+local function ltt_corpse(self, cc)
+    if not opt("ltt_compat") then return false end
+    local lt = zzzz_loot_searching
+    if not (lt and lt.is_item_hidden and self.GetPartner) then return false end
+    local npc = self:GetPartner()
+    if not npc then return false end
+    if npc.alive and npc:alive() then return false end
+    if IsInvbox(npc) then return false end
+    return true
+end
+
+-- Whether to skip sorting this container on LTT's behalf.
+local function ltt_skip(self, cc)
+    if not ltt_corpse(self, cc) then return false end
+    if not opt("ltt_final_sort") then return true end  -- never sort looted bodies
+    return ltt_busy(self, cc)                           -- else sort once revealed
+end
+
+----------------------------------------------------------------------
+-- New-loot highlight
+----------------------------------------------------------------------
+-- Auto-sorting scatters new pickups among existing goods, so it is no longer
+-- obvious what was just found. We tint items taken from a loot container/stash/
+-- body until the inventory closes. Detection is self-contained: in loot mode we
+-- diff the actor bag against a baseline captured when the window opened; any id
+-- that newly appears was looted.
+
+local new_clr   = GetARGB(60, 0, 210, 230)  -- cached highlight colour (MCM-driven)
+local new_items = {}    -- id -> true: looted this session
+local seen_ids  = nil   -- id -> true: actor-bag baseline; nil until established
+
+-- Cache the colour so the per-cell functor is a table read, not a GetARGB call.
+local function refresh_new_color()
+    new_clr = GetARGB(opt("hl_new_a"), opt("hl_new_r"), opt("hl_new_g"), opt("hl_new_b"))
+end
+
+local function reset_new_loot()
+    new_items = {}
+    seen_ids  = nil
+end
+
+local function snapshot_ids(cc)
+    local s = {}
+    if cc and cc.indx_id then
+        for id in pairs(cc.indx_id) do s[id] = true end
+    end
+    return s
+end
+
+-- Mark ids that newly entered the actor bag. The first call only baselines.
+-- Returns true if anything was newly marked (so the caller can repaint).
+local function mark_new_loot(cc_a)
+    if not opt("hl_new") or not (cc_a and cc_a.indx_id) then return false end
+    if not seen_ids then
+        seen_ids = snapshot_ids(cc_a)
+        return false
+    end
+    local changed = false
+    for id in pairs(cc_a.indx_id) do
+        if not seen_ids[id] then
+            new_items[id] = true
+            seen_ids[id]  = true
+            changed = true
+        end
+    end
+    return changed
+end
+
+-- Persistent-highlight functor (SortingPlus paints cells from these).
+local function check_new_loot(cell)
+    if not opt("hl_new") then return nil end
+    if cell and cell.container and cell.container.ID == "actor_bag" and new_items[cell.ID] then
+        return new_clr
+    end
+    return nil
+end
+
+----------------------------------------------------------------------
+-- Core re-sort
+----------------------------------------------------------------------
+
+-- Reposition existing cells into their sorted slots. No Reset/blink, children
+-- preserved, nothing added or removed.
 local function soft_resort(cc)
-    -- collect the parent cells (children ride inside their parent cell)
     local items   = {}
     local cell_of = {}
     for id, idx in pairs(cc.indx_id) do
@@ -81,11 +257,9 @@ local function soft_resort(cc)
             end
         end
     end
-    if #items == 0 then
-        return
-    end
+    if #items == 0 then return end
 
-    -- reset ONLY the grid-packing bookkeeping; cells/contents/children are kept
+    -- Reset only the grid-packing bookkeeping; cells and contents are kept.
     for row, cols in pairs(cc.grid) do
         for col in pairs(cols) do
             cc.grid[row][col] = true
@@ -97,19 +271,15 @@ local function soft_resort(cc)
     cc.rKind.current = false
     cc.rKind.row     = 1
 
-    -- Choose the sort. If SeaX's "Inventory Open Lag Reducer" (mod 464) is
-    -- installed, use its fast precomputed factory -- optimized for large
-    -- inventories (credit: sea-ex). Otherwise use SortingPlus's own comparator
-    -- via GetSortMethod(). Either way, sorting builds the kind data and we place
-    -- each item with the matching kind-aware FindFreeCell (reads that data +
-    -- rKind). This is the stock Reinit flow minus the Reset, so the result
-    -- matches the on-open sort. SeaX is optional; SortingPlus alone is enough.
+    -- Use sea-ex's precomputed comparator (mod 464) when present, else
+    -- SortingPlus's own. Either way each item is placed with the matching
+    -- kind-aware FindFreeCell -- the stock Reinit flow minus the Reset.
     local seax = seax_sortingplus_opt_sort_by_kind
     local cmp, find_free
     if seax and seax.sort_by_kind_factory then
-        cmp, find_free = seax.sort_by_kind_factory(items)  -- fast path (sea-ex)
+        cmp, find_free = seax.sort_by_kind_factory(items)
     else
-        cmp = cc:GetSortMethod()                           -- SortingPlus-native
+        cmp = cc:GetSortMethod()
     end
 
     local saved_find = cc.FindFreeCell
@@ -117,7 +287,7 @@ local function soft_resort(cc)
     for _, obj in spairs(items, cmp) do
         local area = cc:FindFreeCell(obj, obj:section())
         if area then
-            cell_of[obj:id()]:Set(obj, area)  -- reposition only, no blink
+            cell_of[obj:id()]:Set(obj, area)
         end
     end
     cc.FindFreeCell = saved_find
@@ -125,32 +295,23 @@ local function soft_resort(cc)
     cc:Scroll_Reinit(true)
 end
 
--- Perform the actual re-sort (soft in place only) and record the sorted
--- fingerprint so we will not re-sort the same layout again.
---
--- SOFT-ONLY BY DESIGN -- we never fall back to a full Reinit. A Reinit rebuild
--- (Reset + re-add every cell) is expensive and, on a large loot container such
--- as a corpse or stash, visibly churns the list and tanks FPS. If the in-place
--- sort cannot run (no SortingPlus, or the window is sorted by "sizekind" instead
--- of "kind"), we simply leave the order untouched -- items land at the end like
--- vanilla, with no churn and no performance cost. SortingPlus is the only hard
--- requirement (SeaX / mod 464 is optional and no longer needed).
---
--- (Avoiding Reinit is doubly important for trade: a trade-container Reinit would
--- rebuild from ParseInventory(npc), re-adding basketed items into the sale bag
--- -- the old duplicate / stuck-in-basket bug. soft_resort cannot do that.)
+-- Run a soft re-sort (when possible) and record the resulting layout so the same
+-- arrangement is not sorted again. Soft-only: if it cannot run, order is left as
+-- is rather than doing a heavy Reinit.
 local function resort_now(self, cc, key, parse_fn, soft_only)
     if can_soft(cc) then
         pcall(soft_resort, cc)
     end
-    last_fp[key] = fingerprint(cc)  -- record layout; if soft could not run, skip
+    last_fp[key] = fingerprint(cc)
 end
 
--- While shift is held (bulk transfer), wait; re-sort once when it is released.
+----------------------------------------------------------------------
+-- Deferral watchers
+----------------------------------------------------------------------
+
+-- FastTransfer sweep: while SHIFT is held, wait; re-sort once on release.
 local function arm_release(self, cc, key, parse_fn, soft_only)
-    if rel_armed[key] then
-        return
-    end
+    if rel_armed[key] then return end
     rel_armed[key] = true
     local tries = 0
     CreateTimeEvent("gun_resort_rel_" .. key, "gun_resort_rel_" .. key, 0, function()
@@ -168,35 +329,72 @@ local function arm_release(self, cc, key, parse_fn, soft_only)
             rel_armed[key] = false
             return true
         end
-        return false  -- keep waiting while shift held
+        return false
     end)
 end
 
--- Called right after a stock refresh. Re-sorts the container if it changed,
--- deferring while shift is held. saved_pos = scroll position before the refresh.
+-- LTT reveal (ltt_final_sort on): wait for the reveal to finish, then sort once.
+local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
+    if ltt_armed[key] then return end
+    ltt_armed[key] = true
+    local tries = 0
+    CreateTimeEvent("siss_ltt_" .. key, "siss_ltt_" .. key, 0, function()
+        tries = tries + 1
+        if (not cc:IsShown()) or (tries >= 1800) then
+            ltt_armed[key] = false
+            return true
+        end
+        if not ltt_busy(self, cc) then
+            if opt("ltt_final_sort") and (not shift_held()) then
+                local pos = cc.scroll:GetCurrentScrollPos()
+                resort_now(self, cc, key, parse_fn, soft_only)
+                cc:Scroll_SetPos(pos, true)
+            else
+                last_fp[key] = fingerprint(cc)
+            end
+            ltt_armed[key] = false
+            return true
+        end
+        return false
+    end)
+end
+
+-- Decide what to do with a container right after a stock refresh.
 local function handle(self, cc, key, parse_fn, saved_pos, soft_only)
-    if not (cc and cc:IsShown()) then
+    if not opt("enable") then return end
+    if not (cc and cc:IsShown()) then return end
+    if fingerprint(cc) == (last_fp[key] or -1) then return end
+
+    if osc_blocked(key) then
+        last_fp[key] = fingerprint(cc)
         return
     end
-    if fingerprint(cc) == (last_fp[key] or -1) then
-        return  -- nothing changed since last sort
+    if ltt_skip(self, cc) then
+        last_fp[key] = fingerprint(cc)
+        if opt("ltt_final_sort") then
+            arm_ltt_release(self, cc, key, parse_fn, soft_only)
+        end
+        return
     end
     if shift_held() then
-        arm_release(self, cc, key, parse_fn, soft_only)  -- bulk: defer to release
+        arm_release(self, cc, key, parse_fn, soft_only)
         return
     end
+
     resort_now(self, cc, key, parse_fn, soft_only)
+    osc_note(key)
     if saved_pos then
         cc:Scroll_SetPos(saved_pos, true)
     end
 end
 
--- Item list the game uses for the loot/stash/container side (npc_bag).
+----------------------------------------------------------------------
+-- Small utilities
+----------------------------------------------------------------------
+
 local function parse_container(self)
     local npc = self:GetPartner()
-    if not npc then
-        return {}
-    end
+    if not npc then return {} end
     if self.npc_is_companion then
         return self:ParseInventory_Companion(npc)
     end
@@ -211,7 +409,10 @@ local function scroll_pos(cc)
     end
 end
 
--- Hook the refreshes: capture scroll, run stock refresh, then re-sort same frame.
+----------------------------------------------------------------------
+-- Refresh hooks: run the stock refresh, then re-sort the same frame
+----------------------------------------------------------------------
+
 local orig_IMode = ui_inventory.UIInventory.IMode_RefreshInventories
 function ui_inventory.UIInventory:IMode_RefreshInventories()
     local cc_a = self.CC["actor_bag"]
@@ -229,10 +430,13 @@ function ui_inventory.UIInventory:LMode_RefreshInventories()
     orig_LMode(self)
     handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
     handle(self, cc_b, "npc",   function() return parse_container(self) end,        sp_b)
+    if mark_new_loot(cc_a) then
+        pcall(function() self:UpdateItems() end)  -- repaint so the tint shows at once
+    end
 end
 
--- Trade: re-sort the two SALE BAGS only (not the baskets), and SOFT-ONLY -- a
--- trade-container Reinit would re-add basketed items into the sale bag.
+-- Trade re-sorts the two SALE BAGS only (never the baskets), and soft-only -- a
+-- trade Reinit would re-add basketed items into the sale bag.
 local orig_TMode = ui_inventory.UIInventory.TMode_RefreshInventories
 function ui_inventory.UIInventory:TMode_RefreshInventories()
     local cc_a = self.CC["actor_trade_bag"]
@@ -244,11 +448,14 @@ function ui_inventory.UIInventory:TMode_RefreshInventories()
     handle(self, cc_b, "npc_tbag",   nil, sp_b, true)
 end
 
--- Favorite / junk toggle hook --------------------------------------------------
---
--- The four containers we may re-sort, paired with the fingerprint key used for
--- each (same keys the refresh hooks above use, so the "already sorted" guard
--- stays consistent).
+----------------------------------------------------------------------
+-- Favorite / junk toggle hook
+----------------------------------------------------------------------
+-- A favorite/junk toggle changes sort order without moving a cell, so the
+-- refresh hooks above never see a change. SortingPlus signals it through
+-- rax_icon_layers.refresh; we hook that and re-sort the shown bags in place,
+-- replacing the stock full-rebuild (and its blink).
+
 local FAV_CONTAINERS = {
     { "actor_bag",       "actor"      },
     { "npc_bag",         "npc"        },
@@ -256,18 +463,16 @@ local FAV_CONTAINERS = {
     { "npc_trade_bag",   "npc_tbag"   },
 }
 
--- Re-sort every shown, sortable container in place. Used for favorite/junk
--- toggles: those change the sort order WITHOUT moving any cell, so the
--- fingerprint guard in handle() would skip them -- here we sort unconditionally.
--- Returns true if we handled the refresh (so the caller can skip the stock,
--- blink-inducing On_Sort rebuild). All re-sorts are soft, including trade.
+-- Re-sort every shown, sortable bag. Returns true if handled (caller then skips
+-- the stock rebuild). Looted bodies under LTT are skipped.
 local function resort_all_shown(self)
-    -- Bail out (let the stock path run) unless at least one shown container can
-    -- be sorted in place -- e.g. SortingPlus inactive or window sorted by size.
+    if not (opt("enable") and opt("fav_junk")) then
+        return false
+    end
     local target = false
     for _, c in ipairs(FAV_CONTAINERS) do
         local cc = self.CC[c[1]]
-        if cc and cc:IsShown() and can_soft(cc) then
+        if cc and cc:IsShown() and can_soft(cc) and not ltt_skip(self, cc) then
             target = true
             break
         end
@@ -277,10 +482,10 @@ local function resort_all_shown(self)
     end
 
     self:UnHighlight_All()
-    self:UpdateItems()  -- redraw the favorite highlight / junk corner icon
+    self:UpdateItems()  -- redraw the favorite/junk icons
     for _, c in ipairs(FAV_CONTAINERS) do
         local cc = self.CC[c[1]]
-        if cc and cc:IsShown() and can_soft(cc) then
+        if cc and cc:IsShown() and can_soft(cc) and not ltt_skip(self, cc) then
             local pos = cc.scroll:GetCurrentScrollPos()
             resort_now(self, cc, c[2])
             cc:Scroll_SetPos(pos, true)
@@ -289,13 +494,6 @@ local function resort_all_shown(self)
     return true
 end
 
--- SortingPlus calls rax_icon_layers.refresh(RESORT and 1) on every fav/junk
--- toggle -- and ONLY there. So we re-sort in place on every call, regardless of
--- the RESORT setting: with RESORT on, stock would do a full On_Sort rebuild
--- (blink) which we replace; with RESORT off, stock would only redraw icons and
--- leave the item where it was -- which is the very thing we are fixing. The
--- pcall makes a re-sort failure fall back to the stock refresh instead of
--- breaking the toggle.
 if rax_icon_layers and rax_icon_layers.refresh then
     local orig_refresh = rax_icon_layers.refresh
     function rax_icon_layers.refresh(mode)
@@ -303,9 +501,33 @@ if rax_icon_layers and rax_icon_layers.refresh then
         if self then
             local ok, handled = pcall(resort_all_shown, self)
             if ok and handled then
-                return  -- reordered in place; skip the stock refresh/rebuild
+                return  -- handled in place; skip the stock rebuild
             end
         end
         return orig_refresh(mode)
     end
+end
+
+----------------------------------------------------------------------
+-- Lifecycle
+----------------------------------------------------------------------
+-- "New" loot is scoped to one inventory session: clear the marks whenever the
+-- inventory opens or closes, so reopening shows no tint until you loot again.
+
+local function on_inv_show(name)
+    if name == "UIInventory" then reset_new_loot() end
+end
+
+local function on_inv_hide(name)
+    if name == "UIInventory" then reset_new_loot() end
+end
+
+function on_game_start()
+    refresh_new_color()
+    if rax_persistent_highlight and rax_persistent_highlight.register then
+        rax_persistent_highlight.register("zz_seamless_new_loot", check_new_loot)
+    end
+    RegisterScriptCallback("GUI_on_show", on_inv_show)
+    RegisterScriptCallback("GUI_on_hide", on_inv_hide)
+    RegisterScriptCallback("on_option_change", refresh_new_color)
 end
