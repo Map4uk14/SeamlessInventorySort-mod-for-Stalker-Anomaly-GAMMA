@@ -40,6 +40,7 @@ local DEF = {
     osc_cooldown   = 1.5,    -- seconds to back off an oscillating container
     ltt_compat     = true,   -- defer to Looting Takes Time on looted bodies
     ltt_final_sort = false,  -- false = never sort a looted body (keep LTT's order)
+    no_sort_bodies = false,  -- never sort looted corpses at all (no LTT required)
     hl_new         = true,   -- tint freshly looted items in the actor bag
     hl_new_r       = 0,      -- highlight colour, red   (0-255)
     hl_new_g       = 210,    -- highlight colour, green (0-255)
@@ -52,6 +53,7 @@ local DEF = {
 local OPT_GROUP = {
     enable         = "siss_general", fav_junk       = "siss_general",
     ltt_compat     = "siss_loot",    ltt_final_sort = "siss_loot",
+    no_sort_bodies = "siss_loot",
     hl_new         = "siss_hl",      hl_new_r       = "siss_hl",
     hl_new_g       = "siss_hl",      hl_new_b       = "siss_hl",
     hl_new_a       = "siss_hl",
@@ -100,6 +102,17 @@ end
 -- are installed).
 local function can_soft(cc)
     return spairs and cc.GetSortMethod and (cc.sort_method == "kind")
+end
+
+-- SortingPlus' intended npc-side sort method: "kind" when its "sort npc
+-- inventories" (NPCINV) toggle is on, else "sizekind". Mirrors line 117 of
+-- zzz_rax_sortingplus_mcm so real containers keep whatever the user set there.
+local function npc_default_sort()
+    if ui_mcm then
+        local v = ui_mcm.get("SortingPlus/npcinv")
+        if v ~= nil then return v and "kind" or "sizekind" end
+    end
+    return "kind"
 end
 
 ----------------------------------------------------------------------
@@ -159,17 +172,46 @@ local function ltt_busy(self, cc)
     return false
 end
 
--- True when LTT is active and this container is a looted dead body (its target).
+-- True only for the LOOTED BODY's own panel (npc_bag) -- never the player's bag.
 -- Living partners (companions/traders) and stashes/boxes are excluded.
-local function ltt_corpse(self, cc)
-    if not opt("ltt_compat") then return false end
-    local lt = zzzz_loot_searching
-    if not (lt and lt.is_item_hidden and self.GetPartner) then return false end
+local function is_corpse(self, cc)
+    if not (cc and cc.ID == "npc_bag") then return false end
+    if not self.GetPartner then return false end
     local npc = self:GetPartner()
     if not npc then return false end
     if npc.alive and npc:alive() then return false end
     if IsInvbox(npc) then return false end
     return true
+end
+
+-- True when LTT is active and this container is its target (a looted dead body).
+local function ltt_corpse(self, cc)
+    if not opt("ltt_compat") then return false end
+    local lt = zzzz_loot_searching
+    if not (lt and lt.is_item_hidden) then return false end
+    return is_corpse(self, cc)
+end
+
+-- "Never sort looted bodies" -- standalone, no LTT required.
+local function no_body(self, cc)
+    return opt("no_sort_bodies") and is_corpse(self, cc)
+end
+
+-- Apply "never sort bodies" the same way SortingPlus' NPCINV toggle does, but
+-- scoped to corpses only: force the looted body's panel to the unsorted (size)
+-- layout while real containers/stashes/companions keep SortingPlus' setting.
+-- Run BEFORE the stock loot refresh so the body is never kind-sorted to begin
+-- with. Only manages sort_method while the feature is on, to avoid clobbering
+-- it otherwise.
+local function apply_body_sort(self)
+    if not (opt("enable") and opt("no_sort_bodies")) then return end
+    local cc = self.CC and self.CC["npc_bag"]
+    if not cc then return end
+    if is_corpse(self, cc) then
+        cc.sort_method = "sizekind"          -- the "sort npc inventories = off" look
+    else
+        cc.sort_method = npc_default_sort()  -- restore for containers/companions
+    end
 end
 
 -- Whether to skip sorting this container on LTT's behalf.
@@ -369,6 +411,10 @@ local function handle(self, cc, key, parse_fn, saved_pos, soft_only)
         last_fp[key] = fingerprint(cc)
         return
     end
+    if no_body(self, cc) then
+        last_fp[key] = fingerprint(cc)  -- leave the corpse exactly as it is
+        return
+    end
     if ltt_skip(self, cc) then
         last_fp[key] = fingerprint(cc)
         if opt("ltt_final_sort") then
@@ -421,10 +467,27 @@ function ui_inventory.UIInventory:IMode_RefreshInventories()
     handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
 end
 
+-- The looted body is sorted when the window OPENS, via these Reinit paths --
+-- not LMode_RefreshInventories (which only handles later incremental changes).
+-- Set the corpse's sort method before the stock Reinit so it is never kind-
+-- sorted to begin with.
+local orig_LReset = ui_inventory.UIInventory.LMode_ResetInventories
+function ui_inventory.UIInventory:LMode_ResetInventories(reset_only)
+    if not reset_only then apply_body_sort(self) end
+    return orig_LReset(self, reset_only)
+end
+
+local orig_LResetNPC = ui_inventory.UIInventory.LMode_ResetNPCInventory
+function ui_inventory.UIInventory:LMode_ResetNPCInventory()
+    apply_body_sort(self)
+    return orig_LResetNPC(self)
+end
+
 local orig_LMode = ui_inventory.UIInventory.LMode_RefreshInventories
 function ui_inventory.UIInventory:LMode_RefreshInventories()
     local cc_a = self.CC["actor_bag"]
     local cc_b = self.CC["npc_bag"]
+    apply_body_sort(self)  -- corpse -> unsorted; containers keep SortingPlus' setting
     local sp_a = scroll_pos(cc_a)
     local sp_b = scroll_pos(cc_b)
     orig_LMode(self)
@@ -472,7 +535,7 @@ local function resort_all_shown(self)
     local target = false
     for _, c in ipairs(FAV_CONTAINERS) do
         local cc = self.CC[c[1]]
-        if cc and cc:IsShown() and can_soft(cc) and not ltt_skip(self, cc) then
+        if cc and cc:IsShown() and can_soft(cc) and not no_body(self, cc) and not ltt_skip(self, cc) then
             target = true
             break
         end
@@ -485,7 +548,7 @@ local function resort_all_shown(self)
     self:UpdateItems()  -- redraw the favorite/junk icons
     for _, c in ipairs(FAV_CONTAINERS) do
         local cc = self.CC[c[1]]
-        if cc and cc:IsShown() and can_soft(cc) and not ltt_skip(self, cc) then
+        if cc and cc:IsShown() and can_soft(cc) and not no_body(self, cc) and not ltt_skip(self, cc) then
             local pos = cc.scroll:GetCurrentScrollPos()
             resort_now(self, cc, c[2])
             cc:Scroll_SetPos(pos, true)

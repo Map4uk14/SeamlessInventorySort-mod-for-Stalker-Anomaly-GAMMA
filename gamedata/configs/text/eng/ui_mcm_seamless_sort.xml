@@ -5,7 +5,7 @@
 	<!-- Menu / subgroup labels -->
 	<string id="ui_mcm_menu_seamless_sort"><text>Seamless Inventory Sort</text></string>
 	<string id="ui_mcm_menu_siss_general"><text>General</text></string>
-	<string id="ui_mcm_menu_siss_loot"><text>Looting Takes Time</text></string>
+	<string id="ui_mcm_menu_siss_loot"><text>Looting and Bodies</text></string>
 	<string id="ui_mcm_menu_siss_hl"><text>New Loot Highlight</text></string>
 	<string id="ui_mcm_menu_siss_perf"><text>Performance</text></string>
 
@@ -22,9 +22,13 @@
 		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
 	</string>
 
-	<!-- Looting Takes Time -->
+	<!-- Looting and Bodies -->
 	<string id="ui_mcm_seamless_sort_siss_loot_desc">
-		<text>Compatibility with the Looting Takes Time (Redux) mod, which reveals a looted body's items gradually. Only dead bodies are affected here; stashes and your own inventory always sort.</text>
+		<text>How looted dead bodies are handled. Only dead bodies are affected on this page; stashes, containers and your own inventory always sort.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_loot_no_sort_bodies"><text>Never sort looted bodies</text></string>
+	<string id="ui_mcm_seamless_sort_siss_loot_no_sort_bodies_desc">
+		<text>Leave looted dead bodies unsorted - the same look as SortingPlus' "sort npc inventories" toggle, but applied to corpses ONLY. Stashes, containers, companions and your own bag keep sorting normally (unlike that toggle, which turns them all off together). Works with or without Looting Takes Time.</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat"><text>Defer while looting</text></string>
 	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat_desc">

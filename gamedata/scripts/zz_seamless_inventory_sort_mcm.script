@@ -8,7 +8,6 @@ local BANNER = "ui_options_slider_player"
 function on_mcm_load()
     return {
         id = "seamless_sort",
-        sh = true,
         gr = {
             { id = "siss_general", sh = true, gr = {
                 { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_general", size = {512,50}, spacing = 20 },
@@ -20,6 +19,7 @@ function on_mcm_load()
             { id = "siss_loot", sh = true, gr = {
                 { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_loot", size = {512,50}, spacing = 20 },
                 { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_loot_desc" },
+                { id = "no_sort_bodies", type = "check", val = 1, def = false },
                 { id = "ltt_compat",     type = "check", val = 1, def = true },
                 { id = "ltt_final_sort", type = "check", val = 1, def = false },
             }},
