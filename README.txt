@@ -15,15 +15,16 @@ FEATURES
   - Keeps the list sorted after: attaching/detaching weapon parts, unloading
     magazines, repairing/crafting, picking items up, moving items to/from
     stashes and bodies, trading, and marking items favorite/junk.
-  - Works in the inventory, loot/stash (both sides) and trade (both sale bags).
+  - Works in the inventory, loot/stash (both sides) and trade (both sale
+    bags); each window can be toggled on or off on its own.
   - FastTransfer: while SHIFT is held the sort is deferred, then applied once
     on release.
   - New-loot highlight: items you just looted get a colored tint in your bag
     until you close the inventory. Color is configurable (cyan by default).
-  - Never sort looted bodies (optional, off by default): leaves dead bodies
-    unsorted while stashes, containers and your own bag keep sorting.
-  - Looting Takes Time (Redux): looted bodies are left in that mod's reveal
-    order.
+  - Looted body handling: one setting chooses how dead bodies behave -- sort
+    normally, never sort (leave as found), keep Looting Takes Time's reveal
+    order, or sort after the reveal finishes. Stashes, containers, companions
+    and your own bag always sort.
   - Anti-oscillation guard: backs off if an unstable item (e.g. a magazine
     being bound) makes a list churn.
 

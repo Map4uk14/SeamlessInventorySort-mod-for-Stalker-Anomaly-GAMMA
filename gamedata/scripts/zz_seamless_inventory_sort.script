@@ -34,13 +34,19 @@
 
 local DEF = {
     enable         = true,   -- master on/off
+    win_inventory  = true,   -- seamless sort in the inventory window
+    win_loot       = true,   -- seamless sort in the loot / stash window
+    win_trade      = true,   -- seamless sort in the trade window
     fav_junk       = true,   -- seamless re-sort on favorite/junk toggle
     osc_guard      = true,   -- anti-oscillation back-off
     osc_limit      = 8,      -- re-sorts per window before backing off
     osc_cooldown   = 1.5,    -- seconds to back off an oscillating container
-    ltt_compat     = true,   -- defer to Looting Takes Time on looted bodies
-    ltt_final_sort = false,  -- false = never sort a looted body (keep LTT's order)
-    no_sort_bodies = false,  -- never sort looted corpses at all (no LTT required)
+    -- Looted-body handling, one of:
+    --   "sort"      sort the corpse like any container, ignoring LTT (default)
+    --   "never"     never sort a corpse; leave it as found (size-kind layout)
+    --   "ltt_keep"  never sort; keep Looting Takes Time's reveal order
+    --   "ltt_after" defer during the LTT reveal, then sort once and keep sorted
+    body_mode      = "sort",
     hl_new         = true,   -- tint freshly looted items in the actor bag
     hl_new_r       = 0,      -- highlight colour, red   (0-255)
     hl_new_g       = 210,    -- highlight colour, green (0-255)
@@ -52,8 +58,9 @@ local DEF = {
 -- here so call sites stay a plain opt(id) regardless of menu layout.
 local OPT_GROUP = {
     enable         = "siss_general", fav_junk       = "siss_general",
-    ltt_compat     = "siss_loot",    ltt_final_sort = "siss_loot",
-    no_sort_bodies = "siss_loot",
+    win_inventory  = "siss_general", win_loot       = "siss_general",
+    win_trade      = "siss_general",
+    body_mode      = "siss_loot",
     hl_new         = "siss_hl",      hl_new_r       = "siss_hl",
     hl_new_g       = "siss_hl",      hl_new_b       = "siss_hl",
     hl_new_a       = "siss_hl",
@@ -115,6 +122,29 @@ local function npc_default_sort()
     return "kind"
 end
 
+-- Per-window enable. Each inventory window can opt out of seamless sorting
+-- independently. self.mode is the engine's own window flag ("inventory" /
+-- "loot" / "trade" / "repair"); repair reuses the inventory toggle. An unknown
+-- mode is never suppressed.
+local MODE_OPT = {
+    inventory = "win_inventory",
+    repair    = "win_inventory",
+    loot      = "win_loot",
+    trade     = "win_trade",
+}
+
+local function win_on(self)
+    local id = MODE_OPT[self and self.mode or ""]
+    if not id then return true end
+    return opt(id)
+end
+
+-- Looted-body handling is a single MCM list ("body_mode"); these derive the
+-- three behaviours the sort logic actually needs from it.
+local function body_no_sort()    return opt("body_mode") == "never" end                -- never sort, leave as found
+local function body_defers()     local m = opt("body_mode"); return m == "ltt_keep" or m == "ltt_after" end  -- defer to LTT's reveal
+local function body_sort_after() return opt("body_mode") == "ltt_after" end            -- sort once the reveal finishes
+
 ----------------------------------------------------------------------
 -- Anti-oscillation guard
 ----------------------------------------------------------------------
@@ -153,13 +183,13 @@ end
 ----------------------------------------------------------------------
 -- LTT reveals a looted body's items gradually and pre-places them on the grid,
 -- so re-sorting fights the reveal. We leave looted DEAD BODIES alone -- either
--- permanently (ltt_final_sort off, the LTT author's intent) or only during the
--- reveal, then sort once (ltt_final_sort on). Stashes, your bag, companions and
--- trade bags are never affected.
+-- permanently (body_mode "ltt_keep", the LTT author's intent) or only during the
+-- reveal, then sort once (body_mode "ltt_after"). Stashes, your bag, companions
+-- and trade bags are never affected.
 
 -- True while LTT is still revealing this container (any item hidden/silhouette).
 local function ltt_busy(self, cc)
-    if not opt("ltt_compat") then return false end
+    if not body_defers() then return false end
     local lt = zzzz_loot_searching
     if not (lt and lt.is_item_hidden and self.GetPartner) then return false end
     local npc = self:GetPartner()
@@ -186,25 +216,24 @@ end
 
 -- True when LTT is active and this container is its target (a looted dead body).
 local function ltt_corpse(self, cc)
-    if not opt("ltt_compat") then return false end
+    if not body_defers() then return false end
     local lt = zzzz_loot_searching
     if not (lt and lt.is_item_hidden) then return false end
     return is_corpse(self, cc)
 end
 
--- "Never sort looted bodies" -- standalone, no LTT required.
+-- body_mode "never": leave the corpse exactly as found -- standalone, no LTT.
 local function no_body(self, cc)
-    return opt("no_sort_bodies") and is_corpse(self, cc)
+    return body_no_sort() and is_corpse(self, cc)
 end
 
--- Apply "never sort bodies" the same way SortingPlus' NPCINV toggle does, but
--- scoped to corpses only: force the looted body's panel to the unsorted (size)
--- layout while real containers/stashes/companions keep SortingPlus' setting.
--- Run BEFORE the stock loot refresh so the body is never kind-sorted to begin
--- with. Only manages sort_method while the feature is on, to avoid clobbering
--- it otherwise.
+-- For body_mode "never", force the looted body's panel to the unsorted (size)
+-- layout the same way SortingPlus' NPCINV toggle does, but scoped to corpses
+-- only, while real containers/stashes/companions keep SortingPlus' setting. Run
+-- BEFORE the stock loot refresh so the body is never kind-sorted to begin with.
+-- Only manages sort_method in this mode, to avoid clobbering it otherwise.
 local function apply_body_sort(self)
-    if not (opt("enable") and opt("no_sort_bodies")) then return end
+    if not (opt("enable") and body_no_sort()) then return end
     local cc = self.CC and self.CC["npc_bag"]
     if not cc then return end
     if is_corpse(self, cc) then
@@ -217,8 +246,8 @@ end
 -- Whether to skip sorting this container on LTT's behalf.
 local function ltt_skip(self, cc)
     if not ltt_corpse(self, cc) then return false end
-    if not opt("ltt_final_sort") then return true end  -- never sort looted bodies
-    return ltt_busy(self, cc)                           -- else sort once revealed
+    if not body_sort_after() then return true end  -- never sort looted bodies
+    return ltt_busy(self, cc)                       -- else sort once revealed
 end
 
 ----------------------------------------------------------------------
@@ -254,9 +283,13 @@ end
 
 -- Mark ids that newly entered the actor bag. The first call only baselines.
 -- Returns true if anything was newly marked (so the caller can repaint).
+-- An EMPTY baseline is treated as "not established yet" and re-taken next time:
+-- opening a box clears the actor bag for a tick before repopulating it (the
+-- engine's deferred box update), and baselining that empty bag would otherwise
+-- flag every item as new once it comes back.
 local function mark_new_loot(cc_a)
     if not opt("hl_new") or not (cc_a and cc_a.indx_id) then return false end
-    if not seen_ids then
+    if (not seen_ids) or (not next(seen_ids)) then
         seen_ids = snapshot_ids(cc_a)
         return false
     end
@@ -382,7 +415,7 @@ local function arm_release(self, cc, key, parse_fn, soft_only)
     end)
 end
 
--- LTT reveal (ltt_final_sort on): wait for the reveal to finish, then sort once.
+-- LTT reveal (body_mode "ltt_after"): wait for the reveal to finish, sort once.
 local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
     if ltt_armed[key] then return end
     ltt_armed[key] = true
@@ -394,7 +427,7 @@ local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
             return true
         end
         if not ltt_busy(self, cc) then
-            if opt("ltt_final_sort") and (not shift_held()) then
+            if body_sort_after() and (not shift_held()) then
                 local pos = cc.scroll:GetCurrentScrollPos()
                 resort_now(self, cc, key, parse_fn, soft_only)
                 cc:Scroll_SetPos(pos, true)
@@ -424,7 +457,7 @@ local function handle(self, cc, key, parse_fn, saved_pos, soft_only)
     end
     if ltt_skip(self, cc) then
         last_fp[key] = fingerprint(cc)
-        if opt("ltt_final_sort") then
+        if body_sort_after() then
             arm_ltt_release(self, cc, key, parse_fn, soft_only)
         end
         return
@@ -471,7 +504,9 @@ function ui_inventory.UIInventory:IMode_RefreshInventories()
     local cc_a = self.CC["actor_bag"]
     local sp_a = scroll_pos(cc_a)
     orig_IMode(self)
-    handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
+    if win_on(self) then
+        handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
+    end
 end
 
 -- The looted body is sorted when the window OPENS, via these Reinit paths --
@@ -498,8 +533,10 @@ function ui_inventory.UIInventory:LMode_RefreshInventories()
     local sp_a = scroll_pos(cc_a)
     local sp_b = scroll_pos(cc_b)
     orig_LMode(self)
-    handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
-    handle(self, cc_b, "npc",   function() return parse_container(self) end,        sp_b)
+    if win_on(self) then
+        handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
+        handle(self, cc_b, "npc",   function() return parse_container(self) end,        sp_b)
+    end
     if mark_new_loot(cc_a) then
         pcall(function() self:UpdateItems() end)  -- repaint so the tint shows at once
     end
@@ -514,8 +551,10 @@ function ui_inventory.UIInventory:TMode_RefreshInventories()
     local sp_a = scroll_pos(cc_a)
     local sp_b = scroll_pos(cc_b)
     orig_TMode(self)
-    handle(self, cc_a, "actor_tbag", nil, sp_a, true)
-    handle(self, cc_b, "npc_tbag",   nil, sp_b, true)
+    if win_on(self) then
+        handle(self, cc_a, "actor_tbag", nil, sp_a, true)
+        handle(self, cc_b, "npc_tbag",   nil, sp_b, true)
+    end
 end
 
 ----------------------------------------------------------------------
@@ -537,6 +576,9 @@ local FAV_CONTAINERS = {
 -- the stock rebuild). Looted bodies under LTT are skipped.
 local function resort_all_shown(self)
     if not (opt("enable") and opt("fav_junk")) then
+        return false
+    end
+    if not win_on(self) then
         return false
     end
     local target = false

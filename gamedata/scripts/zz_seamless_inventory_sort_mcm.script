@@ -12,16 +12,19 @@ function on_mcm_load()
             { id = "siss_general", sh = true, gr = {
                 { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_general", size = {512,50}, spacing = 20 },
                 { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_general_desc" },
-                { id = "enable",   type = "check", val = 1, def = true },
-                { id = "fav_junk", type = "check", val = 1, def = true },
+                { id = "enable",        type = "check", val = 1, def = true },
+                { id = "win_inventory", type = "check", val = 1, def = true },
+                { id = "win_loot",      type = "check", val = 1, def = true },
+                { id = "win_trade",     type = "check", val = 1, def = true },
+                { id = "fav_junk",      type = "check", val = 1, def = true },
             }},
 
             { id = "siss_loot", sh = true, gr = {
                 { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_loot", size = {512,50}, spacing = 20 },
                 { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_loot_desc" },
-                { id = "no_sort_bodies", type = "check", val = 1, def = false },
-                { id = "ltt_compat",     type = "check", val = 1, def = true },
-                { id = "ltt_final_sort", type = "check", val = 1, def = false },
+                { id = "body_mode", type = "list", val = 0, def = "sort", content = {
+                    { "sort" }, { "never" }, { "ltt_keep" }, { "ltt_after" },
+                }},
             }},
 
             { id = "siss_hl", sh = true, gr = {

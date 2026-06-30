@@ -6,7 +6,7 @@
 	<string id="ui_mcm_menu_seamless_sort"><text>Seamless Inventory Sort</text></string>
 	<string id="ui_mcm_menu_siss_general"><text>General</text></string>
 	<string id="ui_mcm_menu_siss_loot"><text>Looting and Bodies</text></string>
-	<string id="ui_mcm_menu_siss_hl"><text>New Loot Highlight</text></string>
+	<string id="ui_mcm_menu_siss_hl"><text>Loot Highlight</text></string>
 	<string id="ui_mcm_menu_siss_perf"><text>Performance</text></string>
 
 	<!-- General -->
@@ -17,6 +17,18 @@
 	<string id="ui_mcm_seamless_sort_siss_general_enable_desc">
 		<text>Master switch. When off, inventories behave like vanilla SortingPlus (items land at the end until you reopen the window).</text>
 	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_inventory"><text>Seamless Sort in inventory window</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_inventory_desc">
+		<text>Keep your own inventory sorted as you modify, move or pick up items. Turn off to let items land at the end in the inventory screen (and the repair screen) until you reopen it.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_loot"><text>Seamless Sort in loot / stash window</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_loot_desc">
+		<text>Keep both sides sorted while looting bodies, stashes and containers. Turn off to leave the loot screen unsorted as you take and drop items. (The body and Looting Takes Time options on the next page still apply.)</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_trade"><text>Seamless Sort in trade window</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_win_trade_desc">
+		<text>Keep both sale bags sorted while trading. Turn off to leave the trade screen unsorted as you move items in and out of the basket.</text>
+	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk"><text>Re-sort on favorite / junk</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk_desc">
 		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
@@ -26,20 +38,16 @@
 	<string id="ui_mcm_seamless_sort_siss_loot_desc">
 		<text>How looted dead bodies are handled. Only dead bodies are affected on this page; stashes, containers and your own inventory always sort.</text>
 	</string>
-	<string id="ui_mcm_seamless_sort_siss_loot_no_sort_bodies"><text>Never sort looted bodies</text></string>
-	<string id="ui_mcm_seamless_sort_siss_loot_no_sort_bodies_desc">
-		<text>Leave looted dead bodies unsorted - the same look as SortingPlus' "sort npc inventories" toggle, but applied to corpses ONLY. Stashes, containers, companions and your own bag keep sorting normally (unlike that toggle, which turns them all off together). Works with or without Looting Takes Time.</text>
+	<string id="ui_mcm_seamless_sort_siss_loot_body_mode"><text>Looted body handling</text></string>
+	<string id="ui_mcm_seamless_sort_siss_loot_body_mode_desc">
+		<text>What to do with a looted dead body's items. Only dead bodies are affected; stashes, containers, companions and your own bag always sort.\n\n- Sort normally: sort the body like any container.\n- Never sort - keep as found: leave the body unsorted (size-kind layout), the same as SortingPlus' "sort npc inventories" off, but for corpses only. No Looting Takes Time needed.\n- Keep Looting Takes Time order: never sort; leave the body exactly in the order Looting Takes Time revealed it. (Looting Takes Time only; behaves like "Sort normally" without it.)\n- Sort after Looting Takes Time reveal: wait for the reveal to finish, then sort once and keep it sorted as you loot. (Looting Takes Time only.)</text>
 	</string>
-	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat"><text>Defer while looting</text></string>
-	<string id="ui_mcm_seamless_sort_siss_loot_ltt_compat_desc">
-		<text>While Looting Takes Time is gradually revealing a looted body, do not re-sort it so the reveal is not disturbed. Leave on if you use Looting Takes Time.</text>
-	</string>
-	<string id="ui_mcm_seamless_sort_siss_loot_ltt_final_sort"><text>Sort body after reveal</text></string>
-	<string id="ui_mcm_seamless_sort_siss_loot_ltt_final_sort_desc">
-		<text>ON: after the reveal finishes, snap the body into sorted order once (and keep it sorted as you loot).\nOFF: never sort a looted body - it stays exactly in the order Looting Takes Time placed it, even as you take items. (Requires "Defer while looting".)</text>
-	</string>
+	<string id="seamless_sort_siss_loot_body_mode_lst_sort"><text>Sort normally</text></string>
+	<string id="seamless_sort_siss_loot_body_mode_lst_never"><text>Never sort - keep as found</text></string>
+	<string id="seamless_sort_siss_loot_body_mode_lst_ltt_keep"><text>Keep Looting Takes Time order</text></string>
+	<string id="seamless_sort_siss_loot_body_mode_lst_ltt_after"><text>Sort after Looting Takes Time reveal</text></string>
 
-	<!-- New Loot Highlight -->
+	<!-- Loot Highlight -->
 	<string id="ui_mcm_seamless_sort_siss_hl_desc">
 		<text>Tint items you just took from a container, stash or body with a colored background, so you can see at a glance what you found. The highlight clears when you close the inventory.</text>
 	</string>
