@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.2
+
+### Changed
+- **Dropping, selling or stashing an item no longer reshuffles the rest of the
+  bag.** If nothing was added and nothing else moved, the gap is just left
+  where the item was instead of repacking everything below it. The bag
+  compacts again next time something is actually added.
+- **Re-sorting is noticeably cheaper.** Only cells that actually change
+  position get rebuilt now — previously every cell was rebuilt (icon, shadow,
+  layers, condition bar) on every re-sort, even ones that hadn't moved. This
+  should cut down the stutter when opening big containers or fully stocked
+  traders.
+- Opening a window that SortingPlus already sorted no longer re-sorts it a
+  second time on the first refresh right after.
+
+### Fixed
+- **Stale "new loot" highlight on reopening a container.** The highlight marks
+  were being cleared too late (after the window had already drawn), and on
+  some closing paths weren't cleared at all, so old tints could still show up.
+  They're now cleared right when the window opens/switches mode, before
+  anything is drawn.
+- The very first item you take right after opening a container is now tinted
+  too (it used to slip through untinted).
+
 ## v1.1
 
 ### Added

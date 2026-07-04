@@ -18,6 +18,8 @@
 
     Behaviour:
       * Inventory / loot / trade refresh        re-sort the changed bag
+      * Pure removals (drop / sell / stash)     keep the gaps -- no repack, no shuffle
+      * Cells already in their sorted slot      left untouched -- no repaint
       * Favorite / junk toggle (SortingPlus)    re-sort in place, no rebuild
       * FastTransfer sweep (SHIFT held)         defer, sort once on release
       * Oscillating sort key (e.g. Mags Redux)  back off until it settles
@@ -82,9 +84,11 @@ end
 -- State
 ----------------------------------------------------------------------
 
-local last_fp   = {}  -- sort key -> fingerprint recorded at last sort
-local rel_armed = {}  -- sort key -> a FastTransfer release watcher is running
-local ltt_armed = {}  -- sort key -> an LTT reveal watcher is running
+local last_fp    = {}  -- sort key -> fingerprint recorded at last sort
+local last_ids   = {}  -- sort key -> id set recorded with last_fp
+local last_areas = {}  -- sort key -> id -> packed grid pos (y*4096+x) of parent cells
+local rel_armed  = {}  -- sort key -> a FastTransfer release watcher is running
+local ltt_armed  = {}  -- sort key -> an LTT reveal watcher is running
 
 ----------------------------------------------------------------------
 -- Helpers
@@ -102,6 +106,39 @@ local function fingerprint(cc)
         h = h + id + indx * 1000003
     end
     return h
+end
+
+-- Record the container's layout as "handled": fingerprint, id set and each
+-- parent cell's grid position. The position snapshot lets removal_only() tell
+-- pure removals apart from real changes without re-sorting.
+local function record(key, cc)
+    last_fp[key] = fingerprint(cc)
+    local ids, areas = {}, {}
+    for id, idx in pairs(cc.indx_id) do
+        ids[id] = true
+        local ci = cc.cell[idx]
+        local a = ci and (ci.ID == id) and ci.area
+        if a then areas[id] = a.y * 4096 + a.x end
+    end
+    last_ids[key], last_areas[key] = ids, areas
+end
+
+-- True when the only difference since the last recorded state is removals: no
+-- new ids and no surviving parent cell moved. The sorted ORDER cannot have
+-- changed, so the re-sort can be skipped and the gaps kept -- dropping,
+-- selling or stashing items no longer shuffles everything below them.
+local function removal_only(key, cc)
+    local ids, areas = last_ids[key], last_areas[key]
+    if not ids then return false end
+    for id, idx in pairs(cc.indx_id) do
+        if not ids[id] then return false end
+        local ci = cc.cell[idx]
+        if ci and (ci.ID == id) then
+            local a = ci.area
+            if (not a) or (areas[id] ~= a.y * 4096 + a.x) then return false end
+        end
+    end
+    return true
 end
 
 -- In-place sorting is possible only when SortingPlus is driving this container,
@@ -363,28 +400,44 @@ local function soft_resort(cc)
     -- the next stock refresh crash with a nil-width compare.
     local saved_find = cc.FindFreeCell
     if find_free then cc.FindFreeCell = find_free end
+    local moved = false
     local ok = pcall(function()
         for _, obj in spairs(items, cmp) do
             local area = cc:FindFreeCell(obj, obj:section())
             if area then
-                cell_of[obj:id()]:Set(obj, area)
+                -- Only re-Set cells that actually move: Set() rebuilds the
+                -- icon, shadow, layers and condition bar, which was the bulk
+                -- of the per-item looting lag on big GAMMA bags.
+                local ci  = cell_of[obj:id()]
+                local old = ci.area
+                if not (old and old.y == area.y and old.x == area.x) then
+                    ci:Set(obj, area)
+                    moved = true
+                end
             end
         end
     end)
     cc.FindFreeCell = saved_find
-    if not ok then return end
+    if not ok then return moved end
 
-    cc:Scroll_Reinit(true)
+    if moved then
+        cc:Scroll_Reinit(true)
+    end
+    return moved
 end
 
 -- Run a soft re-sort (when possible) and record the resulting layout so the same
 -- arrangement is not sorted again. Soft-only: if it cannot run, order is left as
--- is rather than doing a heavy Reinit.
-local function resort_now(self, cc, key, parse_fn, soft_only)
+-- is rather than doing a heavy Reinit. Returns true if any cell moved (so the
+-- caller knows whether a scroll restore is needed at all).
+local function resort_now(cc, key)
+    local moved = false
     if can_soft(cc) then
-        pcall(soft_resort, cc)
+        local ok, m = pcall(soft_resort, cc)
+        moved = (ok and m) or false
     end
-    last_fp[key] = fingerprint(cc)
+    record(key, cc)
+    return moved
 end
 
 ----------------------------------------------------------------------
@@ -392,7 +445,7 @@ end
 ----------------------------------------------------------------------
 
 -- FastTransfer sweep: while SHIFT is held, wait; re-sort once on release.
-local function arm_release(self, cc, key, parse_fn, soft_only)
+local function arm_release(cc, key)
     if rel_armed[key] then return end
     rel_armed[key] = true
     local tries = 0
@@ -405,8 +458,9 @@ local function arm_release(self, cc, key, parse_fn, soft_only)
         if not shift_held() then
             if fingerprint(cc) ~= (last_fp[key] or -1) then
                 local pos = cc.scroll:GetCurrentScrollPos()
-                resort_now(self, cc, key, parse_fn, soft_only)
-                cc:Scroll_SetPos(pos, true)
+                if resort_now(cc, key) then
+                    cc:Scroll_SetPos(pos, true)
+                end
             end
             rel_armed[key] = false
             return true
@@ -416,7 +470,7 @@ local function arm_release(self, cc, key, parse_fn, soft_only)
 end
 
 -- LTT reveal (body_mode "ltt_after"): wait for the reveal to finish, sort once.
-local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
+local function arm_ltt_release(self, cc, key)
     if ltt_armed[key] then return end
     ltt_armed[key] = true
     local tries = 0
@@ -429,10 +483,11 @@ local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
         if not ltt_busy(self, cc) then
             if body_sort_after() and (not shift_held()) then
                 local pos = cc.scroll:GetCurrentScrollPos()
-                resort_now(self, cc, key, parse_fn, soft_only)
-                cc:Scroll_SetPos(pos, true)
+                if resort_now(cc, key) then
+                    cc:Scroll_SetPos(pos, true)
+                end
             else
-                last_fp[key] = fingerprint(cc)
+                record(key, cc)
             end
             ltt_armed[key] = false
             return true
@@ -441,53 +496,49 @@ local function arm_ltt_release(self, cc, key, parse_fn, soft_only)
     end)
 end
 
--- Decide what to do with a container right after a stock refresh.
-local function handle(self, cc, key, parse_fn, saved_pos, soft_only)
+-- Decide what to do with a container right after a stock refresh. Returns true
+-- if a re-sort moved cells (the caller may need to repaint highlights).
+local function handle(self, cc, key, saved_pos)
     if not opt("enable") then return end
     if not (cc and cc:IsShown()) then return end
-    if fingerprint(cc) == (last_fp[key] or -1) then return end
+    local fp = fingerprint(cc)
+    if fp == (last_fp[key] or -1) then return end
 
     if osc_blocked(key) then
-        last_fp[key] = fingerprint(cc)
+        record(key, cc)
         return
     end
     if no_body(self, cc) then
-        last_fp[key] = fingerprint(cc)  -- leave the corpse exactly as it is
+        record(key, cc)  -- leave the corpse exactly as it is
         return
     end
     if ltt_skip(self, cc) then
-        last_fp[key] = fingerprint(cc)
+        record(key, cc)
         if body_sort_after() then
-            arm_ltt_release(self, cc, key, parse_fn, soft_only)
+            arm_ltt_release(self, cc, key)
         end
         return
     end
+    if removal_only(key, cc) then
+        record(key, cc)  -- nothing new, nothing moved: keep the gaps, no shuffle
+        return
+    end
     if shift_held() then
-        arm_release(self, cc, key, parse_fn, soft_only)
+        arm_release(cc, key)
         return
     end
 
-    resort_now(self, cc, key, parse_fn, soft_only)
+    local moved = resort_now(cc, key)
     osc_note(key)
-    if saved_pos then
+    if moved and saved_pos then
         cc:Scroll_SetPos(saved_pos, true)
     end
+    return moved
 end
 
 ----------------------------------------------------------------------
 -- Small utilities
 ----------------------------------------------------------------------
-
-local function parse_container(self)
-    local npc = self:GetPartner()
-    if not npc then return {} end
-    if self.npc_is_companion then
-        return self:ParseInventory_Companion(npc)
-    end
-    local is_box = IsInvbox(npc)
-    local all = (not is_box) and (not npc:alive())
-    return self:ParseInventory(npc, all)
-end
 
 local function scroll_pos(cc)
     if cc and cc:IsShown() then
@@ -499,14 +550,20 @@ end
 -- Refresh hooks: run the stock refresh, then re-sort the same frame
 ----------------------------------------------------------------------
 
-local orig_IMode = ui_inventory.UIInventory.IMode_RefreshInventories
-function ui_inventory.UIInventory:IMode_RefreshInventories()
-    local cc_a = self.CC["actor_bag"]
-    local sp_a = scroll_pos(cc_a)
-    orig_IMode(self)
-    if win_on(self) then
-        handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
-    end
+-- The *_ResetInventories functions run when a window opens or switches mode
+-- and fill the bags with a full, ALREADY SORTED Reinit (spairs in utils_ui).
+-- Record that layout so the first refresh afterwards does not redundantly
+-- re-sort a freshly sorted container -- that redundant pass was the "input
+-- delay when opening containers" people reported. They are also the right
+-- moment to clear the new-loot marks: it happens BEFORE any cell is painted,
+-- unlike GUI_on_show, which fires after the open-time paint (stale tints).
+
+local orig_IReset = ui_inventory.UIInventory.IMode_ResetInventories
+function ui_inventory.UIInventory:IMode_ResetInventories()
+    reset_new_loot()
+    orig_IReset(self)
+    local cc = self.CC["actor_bag"]
+    if cc then record("actor", cc) end
 end
 
 -- The looted body is sorted when the window OPENS, via these Reinit paths --
@@ -515,14 +572,46 @@ end
 -- sorted to begin with.
 local orig_LReset = ui_inventory.UIInventory.LMode_ResetInventories
 function ui_inventory.UIInventory:LMode_ResetInventories(reset_only)
+    reset_new_loot()
     if not reset_only then apply_body_sort(self) end
-    return orig_LReset(self, reset_only)
+    orig_LReset(self, reset_only)
+    local cc_a = self.CC["actor_bag"]
+    local cc_b = self.CC["npc_bag"]
+    if cc_a then record("actor", cc_a) end
+    if cc_b then record("npc", cc_b) end
+    -- Baseline the freshly filled actor bag NOW so the first item taken is
+    -- tinted too (the old lazy baseline swallowed it).
+    if (not reset_only) and opt("hl_new") then
+        local s = snapshot_ids(cc_a)
+        if next(s) then seen_ids = s end
+    end
 end
 
 local orig_LResetNPC = ui_inventory.UIInventory.LMode_ResetNPCInventory
 function ui_inventory.UIInventory:LMode_ResetNPCInventory()
     apply_body_sort(self)
-    return orig_LResetNPC(self)
+    orig_LResetNPC(self)
+    local cc = self.CC["npc_bag"]
+    if cc then record("npc", cc) end
+end
+
+local orig_TReset = ui_inventory.UIInventory.TMode_ResetInventories
+function ui_inventory.UIInventory:TMode_ResetInventories(only_bags)
+    orig_TReset(self, only_bags)
+    local cc_a = self.CC["actor_trade_bag"]
+    local cc_b = self.CC["npc_trade_bag"]
+    if cc_a then record("actor_tbag", cc_a) end
+    if cc_b then record("npc_tbag", cc_b) end
+end
+
+local orig_IMode = ui_inventory.UIInventory.IMode_RefreshInventories
+function ui_inventory.UIInventory:IMode_RefreshInventories()
+    local cc_a = self.CC["actor_bag"]
+    local sp_a = scroll_pos(cc_a)
+    orig_IMode(self)
+    if win_on(self) then
+        handle(self, cc_a, "actor", sp_a)
+    end
 end
 
 local orig_LMode = ui_inventory.UIInventory.LMode_RefreshInventories
@@ -533,12 +622,22 @@ function ui_inventory.UIInventory:LMode_RefreshInventories()
     local sp_a = scroll_pos(cc_a)
     local sp_b = scroll_pos(cc_b)
     orig_LMode(self)
+    local moved
     if win_on(self) then
-        handle(self, cc_a, "actor", function() return self:ParseInventory(db.actor) end, sp_a)
-        handle(self, cc_b, "npc",   function() return parse_container(self) end,        sp_b)
+        moved = handle(self, cc_a, "actor", sp_a)
+        handle(self, cc_b, "npc", sp_b)
     end
-    if mark_new_loot(cc_a) then
-        pcall(function() self:UpdateItems() end)  -- repaint so the tint shows at once
+    -- Tint new pickups. Repaint only the marked cells -- the old full
+    -- UpdateItems() pass over every bag per taken item was a big part of the
+    -- looting lag. After a re-sort that moved cells, repaint the marked ones
+    -- again so their tint survives the move.
+    if cc_a and (mark_new_loot(cc_a) or moved) and next(new_items) then
+        for id in pairs(new_items) do
+            local ci = cc_a:GetCell_ID(id)
+            if ci and (ci.ID == id) then
+                pcall(ci.Highlight, ci, false)
+            end
+        end
     end
 end
 
@@ -552,8 +651,8 @@ function ui_inventory.UIInventory:TMode_RefreshInventories()
     local sp_b = scroll_pos(cc_b)
     orig_TMode(self)
     if win_on(self) then
-        handle(self, cc_a, "actor_tbag", nil, sp_a, true)
-        handle(self, cc_b, "npc_tbag",   nil, sp_b, true)
+        handle(self, cc_a, "actor_tbag", sp_a)
+        handle(self, cc_b, "npc_tbag",   sp_b)
     end
 end
 
@@ -599,8 +698,9 @@ local function resort_all_shown(self)
         local cc = self.CC[c[1]]
         if cc and cc:IsShown() and can_soft(cc) and not no_body(self, cc) and not ltt_skip(self, cc) then
             local pos = cc.scroll:GetCurrentScrollPos()
-            resort_now(self, cc, c[2])
-            cc:Scroll_SetPos(pos, true)
+            if resort_now(cc, c[2]) then
+                cc:Scroll_SetPos(pos, true)
+            end
         end
     end
     return true
@@ -623,12 +723,12 @@ end
 ----------------------------------------------------------------------
 -- Lifecycle
 ----------------------------------------------------------------------
--- "New" loot is scoped to one inventory session: clear the marks whenever the
--- inventory opens or closes, so reopening shows no tint until you loot again.
-
-local function on_inv_show(name)
-    if name == "UIInventory" then reset_new_loot() end
-end
+-- "New" loot is scoped to one inventory session. The marks are cleared in the
+-- *_ResetInventories hooks above (window open / mode switch, BEFORE any cell
+-- is painted) and, as a fallback, when the inventory closes. GUI_on_show is
+-- deliberately not used: it fires only after the open-time paint, so a stale
+-- mark would already be visible -- and some close paths never fire
+-- GUI_on_hide at all, which is how stale tints appeared in the first place.
 
 local function on_inv_hide(name)
     if name == "UIInventory" then reset_new_loot() end
@@ -639,7 +739,6 @@ function on_game_start()
     if rax_persistent_highlight and rax_persistent_highlight.register then
         rax_persistent_highlight.register("zz_seamless_new_loot", check_new_loot)
     end
-    RegisterScriptCallback("GUI_on_show", on_inv_show)
     RegisterScriptCallback("GUI_on_hide", on_inv_hide)
     RegisterScriptCallback("on_option_change", refresh_new_color)
 end
