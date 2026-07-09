@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.2.2
+
+### Fixed
+- **Attaching or detaching a scope, silencer or grenade launcher no longer
+  yanks the weapon out of your bag into an empty weapon slot.** GAMMA rebuilds
+  a weapon when you change its parts, and the engine was auto-equipping the
+  rebuilt weapon whenever the matching slot happened to be free. A weapon you
+  are only modifying in the bag now stays in the bag. New toggle **"Keep
+  modified weapons in the bag"** (General page, on by default) — turn it off
+  for the old behavior.
+
+### Changed
+- **Lighter on frame time.** A few hot paths were cleaned up: options are read
+  from a cache instead of re-parsing an MCM path string on every cell paint and
+  every refresh, the Looting Takes Time reveal check is polled a few times a
+  second instead of every frame, and the removal-tracking snapshot is skipped
+  entirely while "Keep gaps" is off. Fewer stutters when opening or looting big
+  containers.
+
+## v1.2.1
+
+### Changed
+- **"No reshuffle on drop/sell/stash" (from v1.2) is now off by default** and
+  moved to its own toggle: "Keep gaps after removing items" (General page).
+  Some players didn't like the empty slots it leaves behind, so the bag now
+  repacks immediately on removal again unless you turn the toggle on.
+
 ## v1.2
 
 ### Changed

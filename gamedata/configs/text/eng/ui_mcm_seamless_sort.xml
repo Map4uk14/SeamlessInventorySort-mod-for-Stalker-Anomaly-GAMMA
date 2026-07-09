@@ -33,6 +33,14 @@
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk_desc">
 		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
 	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_keep_gaps"><text>Keep gaps after removing items</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_keep_gaps_desc">
+		<text>When you drop, sell or stash an item and nothing else moved, leave the empty slot where it was instead of repacking everything below it. The gap fills back in next time something is added. Turn off to always repack immediately on removal.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump"><text>Keep modified weapons in the bag</text></string>
+	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump_desc">
+		<text>When you attach or detach a scope, silencer or grenade launcher on a weapon in your bag, the engine rebuilds the weapon and equips it to an empty weapon slot, so it jumps out of your bag into the primary / secondary slot. Turn on to move it straight back to the bag so it stays where it was. Turn off to let the engine equip it.</text>
+	</string>
 
 	<!-- Looting and Bodies -->
 	<string id="ui_mcm_seamless_sort_siss_loot_desc">
