@@ -20,6 +20,8 @@ FEATURES
   - No more reshuffle on drop/sell/stash: removing an item just leaves the
     gap instead of shoving everything below it up a slot. Fills back in next
     time something is actually added.
+  - Modified weapons stay in the bag: attaching or detaching a scope, silencer
+    or GL no longer kicks the weapon out of your bag into an empty weapon slot.
   - FastTransfer: while SHIFT is held the sort is deferred, then applied once
     on release.
   - New-loot highlight: items you just looted get a colored tint in your bag

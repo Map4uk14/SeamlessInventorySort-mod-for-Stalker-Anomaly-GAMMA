@@ -18,9 +18,10 @@
 
     Behaviour:
       * Inventory / loot / trade refresh        re-sort the changed bag
-      * Pure removals (drop / sell / stash)     keep the gaps -- no repack, no shuffle
+      * Pure removals (drop / sell / stash)     keep the gaps -- no repack, no shuffle (toggleable)
       * Cells already in their sorted slot      left untouched -- no repaint
       * Favorite / junk toggle (SortingPlus)    re-sort in place, no rebuild
+      * Scope / silencer / GL attach-detach     keep the weapon in the bag, no auto-equip
       * FastTransfer sweep (SHIFT held)         defer, sort once on release
       * Oscillating sort key (e.g. Mags Redux)  back off until it settles
       * Looting Takes Time looted bodies        leave in LTT's order
@@ -40,6 +41,8 @@ local DEF = {
     win_loot       = true,   -- seamless sort in the loot / stash window
     win_trade      = true,   -- seamless sort in the trade window
     fav_junk       = true,   -- seamless re-sort on favorite/junk toggle
+    keep_gaps      = false,  -- leave the gap on pure removals instead of repacking
+    no_slot_jump   = true,   -- keep a modified bag weapon in the bag (no auto-equip)
     osc_guard      = true,   -- anti-oscillation back-off
     osc_limit      = 8,      -- re-sorts per window before backing off
     osc_cooldown   = 1.5,    -- seconds to back off an oscillating container
@@ -61,7 +64,8 @@ local DEF = {
 local OPT_GROUP = {
     enable         = "siss_general", fav_junk       = "siss_general",
     win_inventory  = "siss_general", win_loot       = "siss_general",
-    win_trade      = "siss_general",
+    win_trade      = "siss_general", keep_gaps      = "siss_general",
+    no_slot_jump   = "siss_general",
     body_mode      = "siss_loot",
     hl_new         = "siss_hl",      hl_new_r       = "siss_hl",
     hl_new_g       = "siss_hl",      hl_new_b       = "siss_hl",
@@ -70,14 +74,33 @@ local OPT_GROUP = {
     osc_cooldown   = "siss_perf",
 }
 
--- Live MCM value, or the stand-alone default when MCM is not installed.
-local function opt(id)
-    if ui_mcm then
-        local grp = OPT_GROUP[id]
-        local v = grp and ui_mcm.get("seamless_sort/" .. grp .. "/" .. id)
-        if v ~= nil then return v end
+-- Options are read through a cache. ui_mcm.get splits and hashes its path
+-- string on every call, which is too slow for the hot paths here (opt() runs
+-- inside the per-cell highlight functor and on every refresh). The cache is
+-- filled on game start and re-read whenever any option changes.
+local OPT_PATH = {}
+for id, grp in pairs(OPT_GROUP) do
+    OPT_PATH[id] = "seamless_sort/" .. grp .. "/" .. id
+end
+
+local OPTS      = {}
+local sp_npcinv = nil  -- cached SortingPlus "sort npc inventories" toggle
+
+local function refresh_opts()
+    for id, def in pairs(DEF) do
+        local v = ui_mcm and ui_mcm.get(OPT_PATH[id])
+        if v == nil then v = def end
+        OPTS[id] = v
     end
-    return DEF[id]
+    sp_npcinv = nil
+    if ui_mcm then sp_npcinv = ui_mcm.get("SortingPlus/npcinv") end
+end
+
+-- Cached MCM value, or the stand-alone default when MCM is not installed.
+local function opt(id)
+    local v = OPTS[id]
+    if v == nil then return DEF[id] end
+    return v
 end
 
 ----------------------------------------------------------------------
@@ -110,9 +133,16 @@ end
 
 -- Record the container's layout as "handled": fingerprint, id set and each
 -- parent cell's grid position. The position snapshot lets removal_only() tell
--- pure removals apart from real changes without re-sorting.
-local function record(key, cc)
-    last_fp[key] = fingerprint(cc)
+-- pure removals apart from real changes without re-sorting. Callers that
+-- already computed the fingerprint pass it in so the bag is not walked twice.
+local function record(key, cc, fp)
+    last_fp[key] = fp or fingerprint(cc)
+    if not opt("keep_gaps") then
+        -- The snapshot is only ever read by removal_only(), which is gated on
+        -- keep_gaps; skip the two per-refresh tables when the toggle is off.
+        last_ids[key], last_areas[key] = nil, nil
+        return
+    end
     local ids, areas = {}, {}
     for id, idx in pairs(cc.indx_id) do
         ids[id] = true
@@ -152,10 +182,7 @@ end
 -- inventories" (NPCINV) toggle is on, else "sizekind". Mirrors line 117 of
 -- zzz_rax_sortingplus_mcm so real containers keep whatever the user set there.
 local function npc_default_sort()
-    if ui_mcm then
-        local v = ui_mcm.get("SortingPlus/npcinv")
-        if v ~= nil then return v and "kind" or "sizekind" end
-    end
+    if sp_npcinv ~= nil then return sp_npcinv and "kind" or "sizekind" end
     return "kind"
 end
 
@@ -430,13 +457,15 @@ end
 -- arrangement is not sorted again. Soft-only: if it cannot run, order is left as
 -- is rather than doing a heavy Reinit. Returns true if any cell moved (so the
 -- caller knows whether a scroll restore is needed at all).
-local function resort_now(cc, key)
+local function resort_now(cc, key, fp)
     local moved = false
     if can_soft(cc) then
         local ok, m = pcall(soft_resort, cc)
         moved = (ok and m) or false
     end
-    record(key, cc)
+    -- soft_resort moves cells between grid slots but never touches indx_id,
+    -- so a fingerprint taken before the sort is still valid here.
+    record(key, cc, fp)
     return moved
 end
 
@@ -456,9 +485,10 @@ local function arm_release(cc, key)
             return true
         end
         if not shift_held() then
-            if fingerprint(cc) ~= (last_fp[key] or -1) then
+            local fp = fingerprint(cc)
+            if fp ~= (last_fp[key] or -1) then
                 local pos = cc.scroll:GetCurrentScrollPos()
-                if resort_now(cc, key) then
+                if resort_now(cc, key, fp) then
                     cc:Scroll_SetPos(pos, true)
                 end
             end
@@ -474,12 +504,19 @@ local function arm_ltt_release(self, cc, key)
     if ltt_armed[key] then return end
     ltt_armed[key] = true
     local tries = 0
+    local next_poll = 0
     CreateTimeEvent("siss_ltt_" .. key, "siss_ltt_" .. key, 0, function()
         tries = tries + 1
         if (not cc:IsShown()) or (tries >= 1800) then
             ltt_armed[key] = false
             return true
         end
+        -- ltt_busy walks every corpse item through a pcall; polling that each
+        -- frame for the whole reveal is a steady drain. 4x/sec is plenty --
+        -- the reveal itself takes seconds.
+        local now = time_global()
+        if now < next_poll then return false end
+        next_poll = now + 250
         if not ltt_busy(self, cc) then
             if body_sort_after() and (not shift_held()) then
                 local pos = cc.scroll:GetCurrentScrollPos()
@@ -505,22 +542,22 @@ local function handle(self, cc, key, saved_pos)
     if fp == (last_fp[key] or -1) then return end
 
     if osc_blocked(key) then
-        record(key, cc)
+        record(key, cc, fp)
         return
     end
     if no_body(self, cc) then
-        record(key, cc)  -- leave the corpse exactly as it is
+        record(key, cc, fp)  -- leave the corpse exactly as it is
         return
     end
     if ltt_skip(self, cc) then
-        record(key, cc)
+        record(key, cc, fp)
         if body_sort_after() then
             arm_ltt_release(self, cc, key)
         end
         return
     end
-    if removal_only(key, cc) then
-        record(key, cc)  -- nothing new, nothing moved: keep the gaps, no shuffle
+    if opt("keep_gaps") and removal_only(key, cc) then
+        record(key, cc, fp)  -- nothing new, nothing moved: keep the gaps, no shuffle
         return
     end
     if shift_held() then
@@ -528,7 +565,7 @@ local function handle(self, cc, key, saved_pos)
         return
     end
 
-    local moved = resort_now(cc, key)
+    local moved = resort_now(cc, key, fp)
     osc_note(key)
     if moved and saved_pos then
         cc:Scroll_SetPos(saved_pos, true)
@@ -657,6 +694,102 @@ function ui_inventory.UIInventory:TMode_RefreshInventories()
 end
 
 ----------------------------------------------------------------------
+-- Weapon addon: keep a modified bag weapon in the bag
+----------------------------------------------------------------------
+-- Attaching or detaching a scope, silencer or grenade launcher CLONES the
+-- weapon (GAMMA respawns it so each part keeps its own condition). A restore
+-- step then auto-equips the fresh clone into its matching weapon slot whenever
+-- that slot is empty, so a weapon you were only modifying in the bag suddenly
+-- jumps into the primary / secondary slot.
+--
+-- We hook the low-level clone functions themselves -- so EVERY path is covered
+-- (context menu, drag-drop, the toggle-scope hotkey) rather than one UI button
+-- -- snapshot the weapon slots before the clone, then for a short window move
+-- back to the ruck any weapon that fills a slot which was EMPTY before. Slots
+-- that were already occupied are left alone, so a genuinely equipped weapon
+-- keeps its slot. The clone + auto-equip is deferred and the engine may re-
+-- assert the slot for several frames, so we keep reclaiming across the window
+-- (and settle only once the slots stay clean) instead of catching a single
+-- fill -- that one-shot lost the race in the first version of this fix.
+
+local WPN_SLOTS = { 1, 2, 3 }  -- actor weapon slots (primary / secondary / third)
+
+-- ids currently in the weapon slots, false where empty.
+local function slot_snapshot()
+    local s = {}
+    for i = 1, #WPN_SLOTS do
+        local o = db.actor:item_in_slot(WPN_SLOTS[i])
+        s[WPN_SLOTS[i]] = o and o:id() or false
+    end
+    return s
+end
+
+local function arm_slot_guard(pre)
+    local watch = {}
+    for i = 1, #WPN_SLOTS do
+        local n = WPN_SLOTS[i]
+        if not pre[n] then watch[#watch + 1] = n end
+    end
+    if #watch == 0 then return end  -- every weapon slot full: nothing can auto-equip
+    local tries, last_move, moved = 0, 0, false
+    CreateTimeEvent("siss_wpn_slot", "siss_wpn_slot", 0, function()
+        tries = tries + 1
+        if not db.actor then return true end
+        for i = 1, #watch do
+            local o = db.actor:item_in_slot(watch[i])
+            if o then
+                db.actor:move_to_ruck(o)  -- undo the auto-equip; put it back in the bag
+                moved, last_move = true, tries
+            end
+        end
+        -- Stop once a reclaimed slot has stayed clean for a moment (outlasting
+        -- the engine's deferred re-equip), or at a hard cap (~3 s).
+        if moved and (tries - last_move >= 30) then return true end
+        return tries >= 180
+    end)
+end
+
+-- Wrap a low-level attach/detach clone so a modified bag weapon stays in the
+-- bag. Transparent: the original runs and its return values are passed through.
+-- Only armed while the inventory menu is open, so unrelated (e.g. NPC) addon
+-- work never triggers it.
+local function guard_clone(orig)
+    return function(...)
+        if not (db and db.actor and GetActorMenu()
+                and opt("enable") and opt("no_slot_jump")) then
+            return orig(...)
+        end
+        local pre = slot_snapshot()
+        local res = { orig(...) }
+        arm_slot_guard(pre)
+        return unpack(res)
+    end
+end
+
+-- These are the functions every attach/detach path funnels through to spawn
+-- the reworked weapon. Hook whichever exist, idempotently: run once at load
+-- (so we wrap the base function before any other mod captures it) and again at
+-- game start as a fallback in case a module was not loaded yet at load time.
+local hooked = {}
+local function install_clone_hooks()
+    local targets = {
+        { utils_item,  "attach_addon" },
+        { utils_item,  "detach_addon" },
+        { item_weapon, "attach_scope" },
+        { item_weapon, "detach_scope" },
+    }
+    for _, ref in ipairs(targets) do
+        local tbl, fn = ref[1], ref[2]
+        local key = tostring(tbl) .. fn
+        if tbl and (not hooked[key]) and type(tbl[fn]) == "function" then
+            tbl[fn]     = guard_clone(tbl[fn])
+            hooked[key] = true
+        end
+    end
+end
+install_clone_hooks()
+
+----------------------------------------------------------------------
 -- Favorite / junk toggle hook
 ----------------------------------------------------------------------
 -- A favorite/junk toggle changes sort order without moving a cell, so the
@@ -734,11 +867,18 @@ local function on_inv_hide(name)
     if name == "UIInventory" then reset_new_loot() end
 end
 
-function on_game_start()
+-- Re-read the option cache (and the colour derived from it) on MCM apply.
+local function on_opts_change()
+    refresh_opts()
     refresh_new_color()
+end
+
+function on_game_start()
+    on_opts_change()
+    install_clone_hooks()  -- fallback in case a clone module loaded after us
     if rax_persistent_highlight and rax_persistent_highlight.register then
         rax_persistent_highlight.register("zz_seamless_new_loot", check_new_loot)
     end
     RegisterScriptCallback("GUI_on_hide", on_inv_hide)
-    RegisterScriptCallback("on_option_change", refresh_new_color)
+    RegisterScriptCallback("on_option_change", on_opts_change)
 end

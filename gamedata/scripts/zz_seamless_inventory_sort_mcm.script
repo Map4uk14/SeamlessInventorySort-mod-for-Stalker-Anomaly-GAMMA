@@ -17,6 +17,8 @@ function on_mcm_load()
                 { id = "win_loot",      type = "check", val = 1, def = true },
                 { id = "win_trade",     type = "check", val = 1, def = true },
                 { id = "fav_junk",      type = "check", val = 1, def = true },
+                { id = "keep_gaps",     type = "check", val = 1, def = false },
+                { id = "no_slot_jump",  type = "check", val = 1, def = true },
             }},
 
             { id = "siss_loot", sh = true, gr = {
