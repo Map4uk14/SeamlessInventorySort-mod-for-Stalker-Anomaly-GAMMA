@@ -5,6 +5,7 @@
 	<!-- Menu / subgroup labels -->
 	<string id="ui_mcm_menu_seamless_sort"><text>Seamless Inventory Sort</text></string>
 	<string id="ui_mcm_menu_siss_general"><text>General</text></string>
+	<string id="ui_mcm_menu_siss_gaps"><text>Gaps and Disassembly</text></string>
 	<string id="ui_mcm_menu_siss_loot"><text>Looting and Bodies</text></string>
 	<string id="ui_mcm_menu_siss_hl"><text>Loot Highlight</text></string>
 	<string id="ui_mcm_menu_siss_perf"><text>Performance</text></string>
@@ -33,13 +34,34 @@
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk_desc">
 		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
 	</string>
-	<string id="ui_mcm_seamless_sort_siss_general_keep_gaps"><text>Keep gaps after removing items</text></string>
-	<string id="ui_mcm_seamless_sort_siss_general_keep_gaps_desc">
-		<text>When you drop, sell or stash an item and nothing else moved, leave the empty slot where it was instead of repacking everything below it. The gap fills back in next time something is added. Turn off to always repack immediately on removal.</text>
-	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump"><text>Keep modified weapons in the bag</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump_desc">
 		<text>When you attach or detach a scope, silencer or grenade launcher on a weapon in your bag, the engine rebuilds the weapon and equips it to an empty weapon slot, so it jumps out of your bag into the primary / secondary slot. Turn on to move it straight back to the bag so it stays where it was. Turn off to let the engine equip it.</text>
+	</string>
+
+	<!-- Gaps and Disassembly -->
+	<string id="ui_mcm_seamless_sort_siss_gaps_desc">
+		<text>What happens to the empty slots items leave behind. Keep gaps where things were removed, keep the bag perfectly still while you disassemble, and give ammo parts their own group.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_keep_gaps"><text>Keep gaps after removing items</text></string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_keep_gaps_desc">
+		<text>When you drop, sell or stash an item and nothing else moved, leave the empty slot where it was instead of repacking everything below it. The gap fills back in next time something is added. Turn off to always repack immediately on removal.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_keep_disasm"><text>Keep the bag still when disassembling</text></string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_keep_disasm_desc">
+		<text>While you disassemble, nothing in the bag moves: the dismantled item's slot stays empty and the resulting parts land at the end, so disassembling in quick succession never makes the inventory jump. When you stop, a single re-sort folds the parts into their group and closes the gaps -- the slider below sets how long it waits. Works on its own -- it does not need "Keep gaps after removing items".</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_disasm_delay"><text>Re-sort delay after disassembling (sec)</text></string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_disasm_delay_desc">
+		<text>How long after your last disassembly the bag waits before the settle re-sort. 0 re-sorts the moment the parts land; higher values keep the bag still through a whole disassembly session. Each disassembly restarts the timer. Default 0 s (re-sort as soon as the parts land).</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_ammo_parts_row"><text>Own category for ammo parts</text></string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_ammo_parts_row_desc">
+		<text>Sort casings, bullets and gunpowder (Ammo Maker parts) into their own group right below the ammo instead of mixing them in between the ammo boxes. Takes effect the next time a bag is sorted (reopen the inventory).</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_ap_order"><text>Ammo parts sort position</text></string>
+	<string id="ui_mcm_seamless_sort_siss_gaps_ap_order_desc">
+		<text>Where the ammo parts category sits in the overall sort order, on SortingPlus' scale where ammo is 9 and mutant parts are 10. Default 9.5 puts ammo parts right below the ammo. Lower moves them up (toward weapons and armor), higher moves them down (toward food and junk). Only matters when "Own category for ammo parts" is on. Takes effect on the next sort (reopen the inventory).</text>
 	</string>
 
 	<!-- Looting and Bodies -->

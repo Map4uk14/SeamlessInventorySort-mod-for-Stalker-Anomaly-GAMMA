@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2.3
+
+### Added
+- **New MCM page "Gaps and Disassembly"** collecting everything about the
+  empty slots items leave behind: "Keep gaps after removing items" (moved from
+  General), the two new disassembly options below, and the ammo parts
+  category. If you had changed the moved settings before, set them once more
+  on the new page — moved options restart at their defaults.
+
+- **New toggle "Keep the bag still when disassembling"** (on by default).
+  Disassembling an item — or breaking down ammo — used to reshuffle the whole
+  bag when the resulting parts appeared, which made quick-succession
+  disassembly sessions jump around. Now nothing moves while you
+  disassemble: the dismantled item's slot stays empty and the parts land at
+  their sorted slot. Independent of "Keep gaps after removing
+  items".
+
+- **New slider "Re-sort delay after disassembling"** (0–8 s, default 0 s):
+  how long after your last disassembly the settle re-sort waits. 0 (default)
+  re-sorts the moment the parts land; higher values keep the bag still through
+  a whole session. Each disassembly restarts the timer.
+
+- **New toggle "Own category for ammo parts"** (on by default). Casings,
+  bullets and gunpowder (Ammo Maker parts) now sort into their own group
+  right below the ammo instead of being mixed in between the ammo boxes.
+
 ## v1.2.2
 
 ### Fixed
