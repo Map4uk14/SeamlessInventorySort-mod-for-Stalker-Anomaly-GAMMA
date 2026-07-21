@@ -20,6 +20,14 @@ FEATURES
   - No more reshuffle on drop/sell/stash: removing an item just leaves the
     gap instead of shoving everything below it up a slot. Fills back in next
     time something is actually added.
+  - No more jumping on disassembly: while you take items ammo
+    apart, nothing in the bag moves - each dismantled item's slot stays
+    empty and the parts land at the end. When you stop, a single re-sort
+    folds the parts into their group and closes the gaps (delay
+    configurable, 0-8 s).
+  - Own category for ammo parts: casings, bullets and gunpowder
+    sort into their own group right below the ammo instead of mixing in
+    between the ammo boxes.
   - Modified weapons stay in the bag: attaching or detaching a scope, silencer
     or GL no longer kicks the weapon out of your bag into an empty weapon slot.
   - FastTransfer: while SHIFT is held the sort is deferred, then applied once
@@ -36,9 +44,9 @@ FEATURES
 
 CONFIGURATION (MCM)
 -------------------
-Optional. Options -> Mod Configuration Menu -> Seamless Inventory Sort, in four
-pages: General, Looting and Bodies, New Loot Highlight, Performance. Without MCM
-the mod uses its built-in defaults.
+Optional. Options -> Mod Configuration Menu -> Seamless Inventory Sort, in five
+pages: General, Gaps and Disassembly, Looting and Bodies, New Loot Highlight,
+Performance. Without MCM the mod uses its built-in defaults.
 
 
 REQUIREMENTS

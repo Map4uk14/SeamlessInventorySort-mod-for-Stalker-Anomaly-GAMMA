@@ -22,6 +22,8 @@
       * Cells already in their sorted slot      left untouched -- no repaint
       * Favorite / junk toggle (SortingPlus)    re-sort in place, no rebuild
       * Scope / silencer / GL attach-detach     keep the weapon in the bag, no auto-equip
+      * Disassembling an item                   freeze the bag; one settle sort after (toggleable)
+      * Ammo crafting resources                 own sort category below ammo (toggleable)
       * FastTransfer sweep (SHIFT held)         defer, sort once on release
       * Oscillating sort key (e.g. Mags Redux)  back off until it settles
       * Looting Takes Time looted bodies        leave in LTT's order
@@ -42,6 +44,10 @@ local DEF = {
     win_trade      = true,   -- seamless sort in the trade window
     fav_junk       = true,   -- seamless re-sort on favorite/junk toggle
     keep_gaps      = false,  -- leave the gap on pure removals instead of repacking
+    keep_disasm    = true,   -- freeze the bag while disassembling; settle re-sort after
+    disasm_delay   = 0,      -- seconds after the last disassembly before the settle re-sort
+    ammo_parts_row = true,   -- own sort category for ammo parts (cases, bullets, powder)
+    ap_order       = 9.5,    -- rank of the ammo-parts category (9=ammo, 10=mutant parts)
     no_slot_jump   = true,   -- keep a modified bag weapon in the bag (no auto-equip)
     osc_guard      = true,   -- anti-oscillation back-off
     osc_limit      = 8,      -- re-sorts per window before backing off
@@ -64,8 +70,10 @@ local DEF = {
 local OPT_GROUP = {
     enable         = "siss_general", fav_junk       = "siss_general",
     win_inventory  = "siss_general", win_loot       = "siss_general",
-    win_trade      = "siss_general", keep_gaps      = "siss_general",
-    no_slot_jump   = "siss_general",
+    win_trade      = "siss_general", no_slot_jump   = "siss_general",
+    keep_gaps      = "siss_gaps",    keep_disasm    = "siss_gaps",
+    disasm_delay   = "siss_gaps",    ammo_parts_row = "siss_gaps",
+    ap_order       = "siss_gaps",
     body_mode      = "siss_loot",
     hl_new         = "siss_hl",      hl_new_r       = "siss_hl",
     hl_new_g       = "siss_hl",      hl_new_b       = "siss_hl",
@@ -112,6 +120,8 @@ local last_ids   = {}  -- sort key -> id set recorded with last_fp
 local last_areas = {}  -- sort key -> id -> packed grid pos (y*4096+x) of parent cells
 local rel_armed  = {}  -- sort key -> a FastTransfer release watcher is running
 local ltt_armed  = {}  -- sort key -> an LTT reveal watcher is running
+local dis_armed  = {}  -- sort key -> a disassembly settle watcher is running
+local disasm_until = 0 -- time_global() until which a disassembly's parts may land
 
 ----------------------------------------------------------------------
 -- Helpers
@@ -119,6 +129,14 @@ local ltt_armed  = {}  -- sort key -> an LTT reveal watcher is running
 
 local function shift_held()
     return (key_state(DIK_keys.DIK_LSHIFT) ~= 0) or (key_state(DIK_keys.DIK_RSHIFT) ~= 0)
+end
+
+-- True while a disassembly's removals/parts may be landing in this container.
+-- Only the actor bag is treated specially: the parts always go to the player,
+-- and e.g. a corpse bag emptied during the window must keep repacking normally.
+local function disasm_keep(cc)
+    return opt("keep_disasm") and (time_global() < disasm_until)
+           and (cc.ID == "actor_bag")
 end
 
 -- Position-aware fingerprint: changes if any id is added, removed, or moved to a
@@ -499,6 +517,34 @@ local function arm_release(cc, key)
     end)
 end
 
+-- Disassembly settle: the bag is frozen while a disassembly window is live
+-- (see mark_disassembly); each further disassembly extends the window. Once
+-- it expires -- the session is over and all parts have landed -- run ONE
+-- re-sort that folds the parts into their group and closes the gaps. The
+-- re-sort is unconditional: the frozen refreshes were recorded, so the
+-- fingerprint alone cannot tell that the layout was left unsorted.
+local function arm_disasm_settle(cc, key)
+    if dis_armed[key] then return end
+    dis_armed[key] = true
+    local tries = 0
+    CreateTimeEvent("siss_disasm_" .. key, "siss_disasm_" .. key, 0, function()
+        tries = tries + 1
+        if (not cc:IsShown()) or (tries >= 1800) then
+            dis_armed[key] = false
+            return true
+        end
+        if (time_global() >= disasm_until) and (not shift_held()) then
+            local pos = cc.scroll:GetCurrentScrollPos()
+            if resort_now(cc, key) then
+                cc:Scroll_SetPos(pos, true)
+            end
+            dis_armed[key] = false
+            return true
+        end
+        return false
+    end)
+end
+
 -- LTT reveal (body_mode "ltt_after"): wait for the reveal to finish, sort once.
 local function arm_ltt_release(self, cc, key)
     if ltt_armed[key] then return end
@@ -554,6 +600,16 @@ local function handle(self, cc, key, saved_pos)
         if body_sort_after() then
             arm_ltt_release(self, cc, key)
         end
+        return
+    end
+    -- A disassembly is in progress: freeze the bag. The removal keeps its gap
+    -- (nothing repacks it) and the spawned parts stay where the stock refresh
+    -- appended them, so rapid disassembly never makes the inventory jump. One
+    -- settle re-sort after the window folds the parts into their category and
+    -- closes the gaps.
+    if disasm_keep(cc) then
+        record(key, cc, fp)
+        arm_disasm_settle(cc, key)
         return
     end
     if opt("keep_gaps") and removal_only(key, cc) then
@@ -766,28 +822,125 @@ local function guard_clone(orig)
     end
 end
 
--- These are the functions every attach/detach path funnels through to spawn
--- the reworked weapon. Hook whichever exist, idempotently: run once at load
--- (so we wrap the base function before any other mod captures it) and again at
--- game start as a fallback in case a module was not loaded yet at load time.
+----------------------------------------------------------------------
+-- Disassembly: freeze the bag while the parts land
+----------------------------------------------------------------------
+-- Disassembling removes the item at once but spawns the parts on a time event
+-- 0-3 s later (3 s with item animations on). Re-sorting on either half made
+-- rapid disassembly sessions jump around. Instead, wrapping the disassembly
+-- entry points opens a short window during which the actor bag is not
+-- re-sorted at all: the dismantled item's slot stays empty (nothing repacks
+-- it) and the parts sit where the stock refresh appends them. Every further
+-- disassembly extends the window; when it expires, one settle re-sort
+-- (arm_disasm_settle) folds the parts into their category and closes the
+-- gaps. Independent of keep_gaps.
+--
+-- The window is the engine's spawn delay plus the "disasm_delay" MCM slider,
+-- so the slider reads as "seconds after the parts land": 0 re-sorts the
+-- moment they arrive, higher values hold the bag still through a whole
+-- disassembly session.
+
+local function mark_disassembly(orig)
+    return function(...)
+        if opt("enable") and opt("keep_disasm") then
+            local anim = actor_effects and actor_effects.is_animations_on
+                         and actor_effects.is_animations_on()
+            disasm_until = time_global() + (anim and 3000 or 0)
+                           + (opt("disasm_delay") or 0) * 1000
+        end
+        return orig(...)
+    end
+end
+
+----------------------------------------------------------------------
+-- Ammo parts: own sort category
+----------------------------------------------------------------------
+-- Ammo Maker's casings, bullets and powders inherit is_component = true but
+-- keep the plain ammo kind, so they sort interleaved with real ammo boxes.
+-- Give them their own category, ordered right after ammo: wrap SortingPlus's
+-- get_sort_kind (and sea-ex's captured copy) to reclassify component sections,
+-- and inject the category's order into SortingPlus's item_order table -- it is
+-- unlocalized on GAMMA. Without that table the kind falls back to "na", which
+-- still groups the resources in their own block at the bottom of the bag.
+
+local AP_KIND  = "ammo_parts"  -- rank comes from the ap_order MCM slider (DEF 9.5)
+
+local is_comp = {}  -- sec -> is_component (cached; SYS_GetParam parses the ini)
+local function is_ammo_component(sec)
+    local v = is_comp[sec]
+    if v == nil then
+        v = SYS_GetParam(1, sec, "is_component") and true or false
+        is_comp[sec] = v
+    end
+    return v
+end
+
+local function kind_override(orig)
+    return function(sec, ...)
+        if opt("enable") and opt("ammo_parts_row") and is_ammo_component(sec) then
+            return AP_KIND
+        end
+        return orig(sec, ...)
+    end
+end
+
+-- item_order is REPLACED by SortingPlus's loadsettings() on game start and on
+-- every option change, so a one-time injection would be wiped. loadsettings
+-- is public: wrap it (below) so the category is re-injected right after every
+-- rebuild, no matter who triggers one.
+local function inject_ammo_parts_order()
+    local rax = zzz_rax_sortingplus_mcm
+    if rax and rax.item_order and opt("enable") and opt("ammo_parts_row") then
+        rax.item_order[AP_KIND] = opt("ap_order") or 9.5
+    end
+end
+
+local function inject_after(orig)
+    return function(...)
+        local r = { orig(...) }
+        inject_ammo_parts_order()
+        return unpack(r)
+    end
+end
+
+----------------------------------------------------------------------
+-- Hook installation
+----------------------------------------------------------------------
+-- The clone functions are what every attach/detach path funnels through; the
+-- item_parts ones are what every disassembly path funnels through. Hook
+-- whichever exist, idempotently: once at load (so we wrap the base function
+-- before any other mod captures it) and again at game start as a fallback in
+-- case a module was not loaded yet at load time.
 local hooked = {}
-local function install_clone_hooks()
+local function install_hooks()
     local targets = {
-        { utils_item,  "attach_addon" },
-        { utils_item,  "detach_addon" },
-        { item_weapon, "attach_scope" },
-        { item_weapon, "detach_scope" },
+        { utils_item,  "attach_addon",       guard_clone },
+        { utils_item,  "detach_addon",       guard_clone },
+        { item_weapon, "attach_scope",       guard_clone },
+        { item_weapon, "detach_scope",       guard_clone },
+        { item_parts,  "disassembly_item",   mark_disassembly },
+        { item_parts,  "disassembly_weapon", mark_disassembly },
+        { item_parts,  "disassembly_outfit", mark_disassembly },
+        -- GAMMA routes ammo disassembly (incl. "break down all") through Ammo
+        -- Maker's own breakdown, bypassing item_parts entirely.
+        { ammo_maker,  "breakdown",          mark_disassembly },
+        -- Reclassify ammo crafting resources into their own category. sea-ex
+        -- (mod 464) captures its own reference at load, so both copies are
+        -- wrapped; unqualified internal calls resolve through these entries.
+        { zzz_rax_sortingplus_mcm,           "get_sort_kind", kind_override },
+        { seax_sortingplus_opt_sort_by_kind, "get_sort_kind", kind_override },
+        { zzz_rax_sortingplus_mcm,           "loadsettings",  inject_after },
     }
     for _, ref in ipairs(targets) do
-        local tbl, fn = ref[1], ref[2]
+        local tbl, fn, wrap = ref[1], ref[2], ref[3]
         local key = tostring(tbl) .. fn
         if tbl and (not hooked[key]) and type(tbl[fn]) == "function" then
-            tbl[fn]     = guard_clone(tbl[fn])
+            tbl[fn]     = wrap(tbl[fn])
             hooked[key] = true
         end
     end
 end
-install_clone_hooks()
+install_hooks()
 
 ----------------------------------------------------------------------
 -- Favorite / junk toggle hook
@@ -871,11 +1024,12 @@ end
 local function on_opts_change()
     refresh_opts()
     refresh_new_color()
+    inject_ammo_parts_order()  -- push a changed ap_order into item_order right away
 end
 
 function on_game_start()
     on_opts_change()
-    install_clone_hooks()  -- fallback in case a clone module loaded after us
+    install_hooks()  -- fallback in case a hooked module loaded after us
     if rax_persistent_highlight and rax_persistent_highlight.register then
         rax_persistent_highlight.register("zz_seamless_new_loot", check_new_loot)
     end

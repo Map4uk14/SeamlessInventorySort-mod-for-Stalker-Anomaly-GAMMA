@@ -17,8 +17,17 @@ function on_mcm_load()
                 { id = "win_loot",      type = "check", val = 1, def = true },
                 { id = "win_trade",     type = "check", val = 1, def = true },
                 { id = "fav_junk",      type = "check", val = 1, def = true },
-                { id = "keep_gaps",     type = "check", val = 1, def = false },
                 { id = "no_slot_jump",  type = "check", val = 1, def = true },
+            }},
+
+            { id = "siss_gaps", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_gaps", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_gaps_desc" },
+                { id = "keep_gaps",      type = "check", val = 1, def = false },
+                { id = "keep_disasm",    type = "check", val = 1, def = true },
+                { id = "disasm_delay",   type = "track", val = 2, min = 0, max = 8, step = 0.5, def = 0 },
+                { id = "ammo_parts_row", type = "check", val = 1, def = true },
+                { id = "ap_order",       type = "track", val = 2, min = 1, max = 15, step = 0.5, def = 9.5 },
             }},
 
             { id = "siss_loot", sh = true, gr = {
