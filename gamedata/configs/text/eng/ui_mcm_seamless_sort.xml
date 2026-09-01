@@ -5,6 +5,7 @@
 	<!-- Menu / subgroup labels -->
 	<string id="ui_mcm_menu_seamless_sort"><text>Seamless Inventory Sort</text></string>
 	<string id="ui_mcm_menu_siss_general"><text>General</text></string>
+	<string id="ui_mcm_menu_siss_auto"><text>Compatible Supplies</text></string>
 	<string id="ui_mcm_menu_siss_gaps"><text>Gaps and Disassembly</text></string>
 	<string id="ui_mcm_menu_siss_loot"><text>Looting and Bodies</text></string>
 	<string id="ui_mcm_menu_siss_hl"><text>Loot Highlight</text></string>
@@ -37,6 +38,19 @@
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump"><text>Keep modified weapons in the bag</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump_desc">
 		<text>When you attach or detach a scope, silencer or grenade launcher on a weapon in your bag, the engine rebuilds the weapon and equips it to an empty weapon slot, so it jumps out of your bag into the primary / secondary slot. Turn on to move it straight back to the bag so it stays where it was. Turn off to let the engine equip it.</text>
+	</string>
+
+	<!-- Compatible Supplies -->
+	<string id="ui_mcm_seamless_sort_siss_auto_desc">
+		<text>Temporarily prioritize ammo and attachments compatible with your equipped weapons. Your saved SortingPlus favorites are never changed.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_auto_auto_fav"><text>Prioritize compatible supplies</text></string>
+	<string id="ui_mcm_seamless_sort_siss_auto_auto_fav_desc">
+		<text>Master switch. Move compatible ammo, scopes, suppressors and grenade launchers into the favorites group and highlight them in enabled inventories.</text>
+	</string>
+	<string id="ui_mcm_seamless_sort_siss_auto_auto_fav_own"><text>Apply in my inventory</text></string>
+	<string id="ui_mcm_seamless_sort_siss_auto_auto_fav_own_desc">
+		<text>Apply the priority and highlight to your own inventory and trade bag. Turn off to leave your items normally sorted while compatible supplies in loot containers and trader stock stay prioritized.</text>
 	</string>
 
 	<!-- Gaps and Disassembly -->

@@ -20,6 +20,13 @@ function on_mcm_load()
                 { id = "no_slot_jump",  type = "check", val = 1, def = true },
             }},
 
+            { id = "siss_auto", sh = true, gr = {
+                { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_auto", size = {512,50}, spacing = 20 },
+                { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_auto_desc" },
+                { id = "auto_fav",     type = "check", val = 1, def = true },
+                { id = "auto_fav_own", type = "check", val = 1, def = true },
+            }},
+
             { id = "siss_gaps", sh = true, gr = {
                 { id = "title", type = "slide", link = BANNER, text = "ui_mcm_menu_siss_gaps", size = {512,50}, spacing = 20 },
                 { id = "desc",  type = "desc",  text = "ui_mcm_seamless_sort_siss_gaps_desc" },

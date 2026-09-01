@@ -43,6 +43,8 @@ local DEF = {
     win_loot       = true,   -- seamless sort in the loot / stash window
     win_trade      = true,   -- seamless sort in the trade window
     fav_junk       = true,   -- seamless re-sort on favorite/junk toggle
+    auto_fav       = true,   -- prioritize supplies compatible with equipped weapons
+    auto_fav_own   = true,   -- apply that priority to the actor's own bags
     keep_gaps      = false,  -- leave the gap on pure removals instead of repacking
     keep_disasm    = true,   -- freeze the bag while disassembling; settle re-sort after
     disasm_delay   = 0,      -- seconds after the last disassembly before the settle re-sort
@@ -69,6 +71,7 @@ local DEF = {
 -- here so call sites stay a plain opt(id) regardless of menu layout.
 local OPT_GROUP = {
     enable         = "siss_general", fav_junk       = "siss_general",
+    auto_fav       = "siss_auto",    auto_fav_own   = "siss_auto",
     win_inventory  = "siss_general", win_loot       = "siss_general",
     win_trade      = "siss_general", no_slot_jump   = "siss_general",
     keep_gaps      = "siss_gaps",    keep_disasm    = "siss_gaps",
@@ -93,6 +96,7 @@ end
 
 local OPTS      = {}
 local sp_npcinv = nil  -- cached SortingPlus "sort npc inventories" toggle
+local active_sort_bag = nil  -- container whose comparator/factory is running
 
 local function refresh_opts()
     for id, def in pairs(DEF) do
@@ -291,8 +295,13 @@ local function is_corpse(self, cc)
     if not self.GetPartner then return false end
     local npc = self:GetPartner()
     if not npc then return false end
-    if npc.alive and npc:alive() then return false end
     if IsInvbox(npc) then return false end
+    -- npc.alive does not exist on inanimate containers (e.g. placeable
+    -- stashes); indexing it on those throws "cannot access class member
+    -- Alive!" instead of returning nil. IsInvbox above already filters
+    -- those out, but pcall guards against any other non-NPC object type.
+    local ok, alive = pcall(function() return npc.alive and npc:alive() end)
+    if ok and alive then return false end
     return true
 end
 
@@ -431,10 +440,18 @@ local function soft_resort(cc)
     -- Use sea-ex's precomputed comparator (mod 464) when present, else
     -- SortingPlus's own. Either way each item is placed with the matching
     -- kind-aware FindFreeCell -- the stock Reinit flow minus the Reset.
+    local previous_sort_bag = active_sort_bag
+    active_sort_bag = cc.ID
+
     local seax = seax_sortingplus_opt_sort_by_kind
     local cmp, find_free
     if seax and seax.sort_by_kind_factory then
-        cmp, find_free = seax.sort_by_kind_factory(items)
+        local ok
+        ok, cmp, find_free = pcall(seax.sort_by_kind_factory, items)
+        if not ok then
+            active_sort_bag = previous_sort_bag
+            return
+        end
     else
         cmp = cc:GetSortMethod()
     end
@@ -463,6 +480,7 @@ local function soft_resort(cc)
         end
     end)
     cc.FindFreeCell = saved_find
+    active_sort_bag = previous_sort_bag
     if not ok then return moved end
 
     if moved then
@@ -853,8 +871,143 @@ local function mark_disassembly(orig)
 end
 
 ----------------------------------------------------------------------
--- Ammo parts: own sort category
+-- Equipped-weapon supplies and ammo-parts sort categories
 ----------------------------------------------------------------------
+-- Compatible supplies are temporary favorites. Unlike HarukaSai's original
+-- implementation, this does not write into SortingPlus's saved favorite table,
+-- so changing weapons cannot erase a favorite the player marked manually.
+
+local AUTO_KIND  = "favorites"
+local AUTO_SLOTS = { 1, 2, 3, 5 }
+local AUTO_BAGS  = {
+    actor_bag = true, npc_bag = true,
+    actor_trade_bag = true, npc_trade_bag = true,
+}
+local AUTO_OWN_BAGS = { actor_bag = true, actor_trade_bag = true }
+local AUTO_ADDON_PARAMS = { "scopes_sect", "silencer_name", "grenade_launcher_name" }
+local AUTO_COLOR = GetARGB(50, 176, 238, 26)
+
+local auto_sections = {}
+local auto_signature = false
+local auto_refresh_armed = false
+local auto_refresh_force = false
+local auto_inventory_open = false
+
+local function auto_allowed_in(bag_id)
+    return opt("auto_fav_own") or not AUTO_OWN_BAGS[bag_id]
+end
+
+local function add_auto_section(t, sec)
+    if type(sec) == "string" and sec ~= "" and sec ~= "none" then
+        t[sec] = true
+    end
+end
+
+local function slot_signature()
+    if not (db and db.actor) then return false end
+    local out = {}
+    for i = 1, #AUTO_SLOTS do
+        local obj = db.actor:item_in_slot(AUTO_SLOTS[i])
+        out[i] = obj and (tostring(obj:id()) .. ":" .. obj:section()) or "-"
+    end
+    return table.concat(out, "|")
+end
+
+local function collect_weapon_supplies(t, wpn)
+    if not (wpn and IsWeapon(wpn)) or IsItem("fake_ammo_wpn", wpn:section()) then
+        return
+    end
+
+    local sec = wpn:section()
+    local ok, ammo = pcall(utils_item.get_ammo, nil, wpn:id(), true)
+    if ok and type(ammo) == "table" then
+        for ammo_sec in pairs(ammo) do add_auto_section(t, ammo_sec) end
+    end
+
+    local scopes = SYS_GetParam(0, sec, "scopes")
+    if type(scopes) == "string" then
+        for _, scope in pairs(str_explode(scopes, ",")) do
+            add_auto_section(t, scope)
+        end
+    end
+
+    for i = 1, #AUTO_ADDON_PARAMS do
+        local param = AUTO_ADDON_PARAMS[i]
+        local got, addon = pcall(utils_item.get_wpn_param, wpn, sec, param)
+        if got then add_auto_section(t, addon) end
+    end
+end
+
+local function same_sections(a, b)
+    for sec in pairs(a) do if not b[sec] then return false end end
+    for sec in pairs(b) do if not a[sec] then return false end end
+    return true
+end
+
+local function rebuild_auto_favorites(force)
+    local sig = slot_signature()
+    if not force and sig == auto_signature then return false end
+
+    local next_sections = {}
+    if sig and opt("enable") and opt("auto_fav") then
+        for i = 1, #AUTO_SLOTS do
+            collect_weapon_supplies(next_sections, db.actor:item_in_slot(AUTO_SLOTS[i]))
+        end
+    end
+
+    auto_signature = sig
+    if same_sections(auto_sections, next_sections) then return force and true or false end
+    auto_sections = next_sections
+    return true
+end
+
+-- Equipment callbacks can arrive in bursts while a weapon is cloned/moved.
+-- Coalesce them into one rebuild after the move has settled.
+local function arm_auto_favorite_refresh(force)
+    auto_refresh_force = auto_refresh_force or force
+    if auto_refresh_armed then return end
+    auto_refresh_armed = true
+    CreateTimeEvent("siss_auto_fav", "siss_auto_fav", 0, function()
+        local forced = auto_refresh_force
+        auto_refresh_force = false
+        auto_refresh_armed = false
+        if rebuild_auto_favorites(forced) and auto_inventory_open
+                and rax_icon_layers and rax_icon_layers.refresh then
+            rax_icon_layers.refresh(1)
+        end
+        return true
+    end)
+end
+
+local function check_auto_favorite(cell)
+    if not (opt("enable") and opt("auto_fav")) then return nil end
+    if cell and cell.container and AUTO_BAGS[cell.container.ID]
+            and auto_allowed_in(cell.container.ID)
+            and auto_sections[cell.section] then
+        return AUTO_COLOR
+    end
+    return nil
+end
+
+local function icon_auto_favorite(cell, obj, sec)
+    sec = sec or (cell and cell.section)
+    if not (opt("enable") and opt("auto_fav") and cell and cell.container
+            and AUTO_BAGS[cell.container.ID] and auto_allowed_in(cell.container.ID)
+            and sec and auto_sections[sec]) then
+        return nil
+    end
+    local rax = zzz_rax_sortingplus_mcm
+    if rax and rax.is_favorite and rax.is_favorite(sec) then return nil end
+    local axis = utils_xml.get_item_axis(sec)
+    return {
+        texture = "ui\\sortingplus\\icon-favourite",
+        y = axis.h / 2 - 11,
+        x = 0,
+        w = 15,
+        h = 15,
+    }
+end
+
 -- Ammo Maker's casings, bullets and powders inherit is_component = true but
 -- keep the plain ammo kind, so they sort interleaved with real ammo boxes.
 -- Give them their own category, ordered right after ammo: wrap SortingPlus's
@@ -877,6 +1030,10 @@ end
 
 local function kind_override(orig)
     return function(sec, ...)
+        if opt("enable") and opt("auto_fav") and auto_allowed_in(active_sort_bag)
+                and auto_sections[sec] then
+            return AUTO_KIND
+        end
         if opt("enable") and opt("ammo_parts_row") and is_ammo_component(sec) then
             return AP_KIND
         end
@@ -912,6 +1069,17 @@ end
 -- before any other mod captures it) and again at game start as a fallback in
 -- case a module was not loaded yet at load time.
 local hooked = {}
+
+local function sort_context(orig)
+    return function(self, ...)
+        local previous = active_sort_bag
+        active_sort_bag = self and self.ID or nil
+        local result = { orig(self, ...) }
+        active_sort_bag = previous
+        return unpack(result)
+    end
+end
+
 local function install_hooks()
     local targets = {
         { utils_item,  "attach_addon",       guard_clone },
@@ -930,6 +1098,11 @@ local function install_hooks()
         { zzz_rax_sortingplus_mcm,           "get_sort_kind", kind_override },
         { seax_sortingplus_opt_sort_by_kind, "get_sort_kind", kind_override },
         { zzz_rax_sortingplus_mcm,           "loadsettings",  inject_after },
+        -- sea-ex builds its cached comparator inside Reinit; Inventory
+        -- Antifreeze builds it inside GetSortOrder. Both know the container ID,
+        -- which lets temporary favorites be disabled only for actor-side bags.
+        { utils_ui.UICellContainer,          "Reinit",        sort_context },
+        { utils_ui.UICellContainer,          "GetSortOrder",  sort_context },
     }
     for _, ref in ipairs(targets) do
         local tbl, fn, wrap = ref[1], ref[2], ref[3]
@@ -1017,7 +1190,10 @@ end
 -- GUI_on_hide at all, which is how stale tints appeared in the first place.
 
 local function on_inv_hide(name)
-    if name == "UIInventory" then reset_new_loot() end
+    if name == "UIInventory" then
+        auto_inventory_open = false
+        reset_new_loot()
+    end
 end
 
 -- Re-read the option cache (and the colour derived from it) on MCM apply.
@@ -1025,6 +1201,24 @@ local function on_opts_change()
     refresh_opts()
     refresh_new_color()
     inject_ammo_parts_order()  -- push a changed ap_order into item_order right away
+    arm_auto_favorite_refresh(true)
+end
+
+local function on_inventory_show(name)
+    if name == "UIInventory" then
+        install_hooks()
+        auto_inventory_open = true
+        arm_auto_favorite_refresh(true)
+    end
+end
+
+local function on_first_actor_update()
+    install_hooks()
+    arm_auto_favorite_refresh(true)
+end
+
+local function on_equipment_change()
+    arm_auto_favorite_refresh(false)
 end
 
 function on_game_start()
@@ -1032,7 +1226,16 @@ function on_game_start()
     install_hooks()  -- fallback in case a hooked module loaded after us
     if rax_persistent_highlight and rax_persistent_highlight.register then
         rax_persistent_highlight.register("zz_seamless_new_loot", check_new_loot)
+        rax_persistent_highlight.register("zz_siss_auto_favorite", check_auto_favorite)
     end
+    if rax_icon_layers and rax_icon_layers.register then
+        rax_icon_layers.register("zz_siss_auto_favorite", icon_auto_favorite)
+    end
+    RegisterScriptCallback("actor_on_first_update", on_first_actor_update)
+    RegisterScriptCallback("actor_item_to_slot", on_equipment_change)
+    RegisterScriptCallback("actor_item_to_ruck", on_equipment_change)
+    RegisterScriptCallback("actor_on_item_drop", on_equipment_change)
+    RegisterScriptCallback("GUI_on_show", on_inventory_show)
     RegisterScriptCallback("GUI_on_hide", on_inv_hide)
     RegisterScriptCallback("on_option_change", on_opts_change)
 end
