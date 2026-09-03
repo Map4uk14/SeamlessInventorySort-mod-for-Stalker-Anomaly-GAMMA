@@ -28,6 +28,11 @@ FEATURES
   - Own category for ammo parts: casings, bullets and gunpowder
     sort into their own group right below the ammo instead of mixing in
     between the ammo boxes.
+  - Compatible supplies stay in reach: ammo, scopes, suppressors and grenade
+    launchers that fit your equipped weapons temporarily move into the
+    favorites group and receive a favorite highlight. Saved SortingPlus
+    favorites are never changed. This can be disabled or limited to loot and
+    trader inventories.
   - Modified weapons stay in the bag: attaching or detaching a scope, silencer
     or GL no longer kicks the weapon out of your bag into an empty weapon slot.
   - FastTransfer: while SHIFT is held the sort is deferred, then applied once
@@ -44,9 +49,9 @@ FEATURES
 
 CONFIGURATION (MCM)
 -------------------
-Optional. Options -> Mod Configuration Menu -> Seamless Inventory Sort, in five
-pages: General, Gaps and Disassembly, Looting and Bodies, New Loot Highlight,
-Performance. Without MCM the mod uses its built-in defaults.
+Optional. Options -> Mod Configuration Menu -> Seamless Inventory Sort, in six
+pages: General, Compatible Supplies, Gaps and Disassembly, Looting and Bodies,
+New Loot Highlight, Performance. Without MCM the mod uses its built-in defaults.
 
 
 REQUIREMENTS
