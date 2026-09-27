@@ -1,0 +1,107 @@
+-- Single source of truth for runtime defaults and the existing MCM paths.
+local pages = {
+    { id = "siss_general", options = {
+        { "enable", true }, { "win_inventory", true }, { "win_loot", true },
+        { "win_trade", true }, { "fav_junk", true }, { "no_slot_jump", true },
+    } },
+    { id = "siss_auto", options = { { "auto_fav", true }, { "auto_fav_own", true } } },
+    { id = "siss_gaps", options = {
+        { "keep_gaps", false }, { "keep_disasm", true },
+        { "disasm_delay", 0, 0, 8, 0.5 }, { "ammo_parts_row", true },
+        { "ap_order", 9.5, 1, 15, 0.5 },
+    } },
+    { id = "siss_loot", options = {
+        { "body_mode", "sort", { "sort", "never", "ltt_keep", "ltt_after" } },
+    } },
+    { id = "siss_hl", options = {
+        { "hl_new", true }, { "hl_new_r", 0, 0, 255, 1 },
+        { "hl_new_g", 210, 0, 255, 1 }, { "hl_new_b", 230, 0, 255, 1 },
+        { "hl_new_a", 60, 0, 255, 1 },
+    } },
+    { id = "siss_perf", options = {
+        { "osc_guard", true }, { "osc_limit", 8, 3, 20, 1 },
+        { "osc_cooldown", 1.5, 0.5, 5, 0.5 },
+    } },
+}
+local by_id, paths = {}, {}
+for _, page in ipairs(pages) do
+    for _, option in ipairs(page.options) do
+        by_id[option[1]] = option
+        paths[option[1]] = "seamless_sort/" .. page.id .. "/" .. option[1]
+    end
+end
+
+local function normalize(option, value)
+    local default = option[2]
+    if value == nil then return default end
+    if type(default) == "boolean" then
+        if value == true or value == 1 or value == "true" then return true end
+        if value == false or value == 0 or value == "false" then return false end
+    elseif type(default) == "number" then
+        value = tonumber(value)
+        if value and value == value and value ~= math.huge and value ~= -math.huge then
+            return math.max(option[3], math.min(option[4], value))
+        end
+    else
+        for _, allowed in ipairs(option[3]) do
+            if value == allowed then return value end
+        end
+    end
+    return default
+end
+
+function new(read)
+    local values, npc_sort = {}, "kind"
+    local api = {}
+    local function get_value(path)
+        local ok, value = pcall(read, path)
+        if ok then return value end
+    end
+    function api.refresh()
+        local changed = false
+        for id, option in pairs(by_id) do
+            local value = normalize(option, get_value(paths[id]))
+            if values[id] ~= value then changed = true end
+            values[id] = value
+        end
+        local npc = normalize({ "npcinv", true }, get_value("SortingPlus/npcinv"))
+        local next_sort = npc and "kind" or "sizekind"
+        if next_sort ~= npc_sort then changed = true end
+        npc_sort = next_sort
+        return changed
+    end
+    function api.get(id)
+        if values[id] ~= nil then return values[id] end
+        return by_id[id] and by_id[id][2]
+    end
+    function api.npc_sort() return npc_sort end
+    return api
+end
+
+function mcm()
+    local menu = { id = "seamless_sort", gr = {} }
+    for _, page in ipairs(pages) do
+        local group = { id = page.id, sh = true, gr = {
+            { id = "title", type = "slide", link = "ui_options_slider_player",
+              text = "ui_mcm_menu_" .. page.id, size = {512, 50}, spacing = 20 },
+            { id = "desc", type = "desc", text = "ui_mcm_seamless_sort_" .. page.id .. "_desc" },
+        } }
+        for _, option in ipairs(page.options) do
+            local control = { id = option[1], def = option[2] }
+            if type(option[2]) == "boolean" then
+                control.type, control.val = "check", 1
+            elseif type(option[2]) == "number" then
+                control.type, control.val = "track", 2
+                control.min, control.max, control.step = option[3], option[4], option[5]
+            else
+                control.type, control.val, control.content = "list", 0, {}
+                for _, value in ipairs(option[3]) do
+                    control.content[#control.content + 1] = { value }
+                end
+            end
+            group.gr[#group.gr + 1] = control
+        end
+        menu.gr[#menu.gr + 1] = group
+    end
+    return menu
+end

@@ -1,0 +1,66 @@
+-- All sort entry points share these gates. "wait" is retried; "skip" is final.
+function new(config, env)
+    local opt = config.get
+    local overrides = setmetatable({}, { __mode = "k" })
+    local disassembly_until = 0
+    local modes = { inventory = "win_inventory", repair = "win_inventory",
+                    loot = "win_loot", trade = "win_trade" }
+    local api = {}
+    function api.window(menu)
+        local option = modes[menu and menu.mode]
+        return opt("enable") and (not option or opt(option))
+    end
+    function api.corpse(menu, cc)
+        if cc.ID ~= "npc_bag" or not menu.GetPartner then return false end
+        local npc = menu:GetPartner()
+        if not npc or env.invbox(npc) then return false end
+        local ok, alive = pcall(function() return npc:alive() end)
+        return ok and alive == false
+    end
+    function api.apply_body(menu)
+        local cc = menu.CC and menu.CC.npc_bag
+        if not cc then return end
+        if api.window(menu) and opt("body_mode") == "never" and api.corpse(menu, cc) then
+            if not overrides[cc] then overrides[cc] = cc.sort_method end
+            cc.sort_method = "sizekind"
+        elseif overrides[cc] then
+            cc.sort_method = config.npc_sort()
+            overrides[cc] = nil
+        end
+    end
+    function api.disassemble()
+        if opt("enable") and opt("keep_disasm") then
+            -- At zero configured delay keep the current callback burst frozen.
+            local delay = (env.animations() and 3000 or 0) + opt("disasm_delay") * 1000
+            disassembly_until = math.max(disassembly_until, env.now() + math.max(1, delay))
+        end
+    end
+    function api.clear() disassembly_until = 0 end
+    function api.gate(menu, cc, state)
+        if not api.window(menu) or not cc:IsShown() then return "skip" end
+        local mode = opt("body_mode")
+        if mode ~= "sort" and api.corpse(menu, cc) then
+            if mode == "never" then return "skip" end
+            local hidden = env.ltt()
+            if hidden then
+                if mode == "ltt_keep" then return "skip" end
+                local now = env.now()
+                if not state.ltt_busy or not state.ltt_poll or now >= state.ltt_poll then
+                    state.ltt_poll, state.ltt_busy = now + 250, false
+                    local partner = menu:GetPartner()
+                    for id in pairs(cc.indx_id) do
+                        local ok, value = pcall(hidden, partner:id(), id)
+                        if not ok or value then state.ltt_busy = true; break end
+                    end
+                end
+                if state.ltt_busy then return "wait" end
+            end
+        end
+        if cc.ID == "actor_bag" and opt("keep_disasm") and env.now() < disassembly_until then
+            return "wait"
+        end
+        if env.shift() then return "wait" end
+        return "sort"
+    end
+    return api
+end

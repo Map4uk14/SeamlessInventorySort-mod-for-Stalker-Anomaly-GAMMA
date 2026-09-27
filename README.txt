@@ -1,78 +1,75 @@
-================================================================================
-  SEAMLESS INVENTORY SORT
-  A G.A.M.M.A. RC3 companion to SortingPlus
-================================================================================
+SEAMLESS INVENTORY SORT - EXPERIMENTAL MODULAR BUILD
+==================================================
 
-SortingPlus sorts your inventory when it opens, but the engine drops any item
-you modify or move to the bottom of the list. This mod snaps it back into its
-sorted place the moment it lands -- no flicker, no lost scroll position.
+A SortingPlus companion for S.T.A.L.K.E.R. Anomaly / G.A.M.M.A.
 
-SortingPlus is REQUIRED.
+This test build replaces the old monolithic script with focused modules.
+The 22 MCM settings and their saved paths are unchanged.
 
+INSTALL WITH MOD ORGANIZER 2
+---------------------------
+1. Use "Install a new mod from an archive" and select this ZIP.
+   gamedata must appear at the archive root.
+2. Name it "Seamless Inventory Sort - Modular Test".
+3. Disable the previous Seamless Inventory Sort entry; enable only this one.
+   Keep the previous entry/archive so you can roll back.
+4. Check file conflicts. This entry must provide all siss_*.script helpers,
+   both zz_seamless_inventory_sort*.script entry points, XML, and unlocalizer.
+5. Fully restart the game. Use a test MO2 profile and a backup save.
 
-FEATURES
---------
-  - Keeps the list sorted after: attaching/detaching weapon parts, unloading
-    magazines, repairing/crafting, picking items up, moving items to/from
-    stashes and bodies, trading, and marking items favorite/junk.
-  - Works in the inventory, loot/stash (both sides) and trade (both sale
-    bags); each window can be toggled on or off on its own.
-  - No more reshuffle on drop/sell/stash: removing an item just leaves the
-    gap instead of shoving everything below it up a slot. Fills back in next
-    time something is actually added.
-  - No more jumping on disassembly: while you take items ammo
-    apart, nothing in the bag moves - each dismantled item's slot stays
-    empty and the parts land at the end. When you stop, a single re-sort
-    folds the parts into their group and closes the gaps (delay
-    configurable, 0-8 s).
-  - Own category for ammo parts: casings, bullets and gunpowder
-    sort into their own group right below the ammo instead of mixing in
-    between the ammo boxes.
-  - Compatible supplies stay in reach: ammo, scopes, suppressors and grenade
-    launchers that fit your equipped weapons temporarily move into the
-    favorites group and receive a favorite highlight. Saved SortingPlus
-    favorites are never changed. This can be disabled or limited to loot and
-    trader inventories.
-  - Modified weapons stay in the bag: attaching or detaching a scope, silencer
-    or GL no longer kicks the weapon out of your bag into an empty weapon slot.
-  - FastTransfer: while SHIFT is held the sort is deferred, then applied once
-    on release.
-  - New-loot highlight: items you just looted get a colored tint in your bag
-    until you close the inventory. Color is configurable (cyan by default).
-  - Looted body handling: one setting chooses how dead bodies behave -- sort
-    normally, never sort (leave as found), keep Looting Takes Time's reveal
-    order, or sort after the reveal finishes. Stashes, containers, companions
-    and your own bag always sort.
-  - Anti-oscillation guard: backs off if an unstable item (e.g. a magazine
-    being bound) makes a list churn.
-
-
-CONFIGURATION (MCM)
--------------------
-Optional. Options -> Mod Configuration Menu -> Seamless Inventory Sort, in six
-pages: General, Compatible Supplies, Gaps and Disassembly, Looting and Bodies,
-New Loot Highlight, Performance. Without MCM the mod uses its built-in defaults.
-
+Do not install just the old main script: every included module is required.
+To roll back, close the game, disable this entry, and enable the old version.
+No new save-state fields are added.
 
 REQUIREMENTS
 ------------
-  - SortingPlus (GAMMA mod 110)                       -- REQUIRED
-  - Inventory Open Lag Reducer by sea-ex (mod 464)    -- optional, faster sort
-  - MCM                                               -- optional, settings menu
+SortingPlus (GAMMA mod 110), GAMMA's modded engine and inventory UI.
+Optional: sea-ex Inventory Open Lag Reducer (mod 464), MCM.
+The included unlocalizer exposes SortingPlus caches used by this mod.
 
+FEATURES
+--------
+- In-place sorting after item changes, independently enabled for inventory/
+  repair, loot/stash, and both trade sale bags. Trade baskets are not rebuilt.
+- Optional keep-gaps behavior after pure removal (off by default).
+- Deferred sorting during disassembly, ammo breakdown, and Shift transfers.
+- Separate ammo-component category with adjustable rank.
+- Temporary priority/icons for compatible equipped-weapon supplies, optionally
+  limited to loot/trader stock. Saved favorites and junk are not changed.
+- Bounded clone guard for bag weapons modified through supported addon hooks.
+- Session loot tint, including items added to an existing stack.
+- Corpse modes: normal, stock size-kind layout without automatic kind sorting,
+  preserve Looting Takes Time layout, or sort after the reveal.
+- Oscillation cooldown and bounded recovery attempts.
 
-INSTALLATION
-------------
-1. Place the "501- Seamless Inventory Sort" folder into your GAMMA mods\ folder.
-2. Enable it in Mod Organizer 2. Load order does not matter. Safe to add or
-   remove mid-playthrough.
+MCM: Options -> Mod Configuration Menu -> Seamless Inventory Sort.
+Six pages: General, Compatible Supplies, Gaps and Disassembly, Looting and
+Bodies, Loot Highlight, Performance. MCM is optional; defaults are built in.
 
+WHAT TO EXPECT
+--------------
+Most visible behavior should remain familiar. Unchanged refreshes skip sorts
+and cell rendering; actual sorts repaint only moved parent cells. Queued work
+shares safety gates and is discarded when the inventory session changes.
+
+This is not an engine-level large-stash loading fix. Initial enumeration,
+stacking and UI creation still belong to GAMMA. Large-stash lag was also
+observed with this mod disabled. Automated Lua tests do not certify game FPS.
+
+TEST BEFORE KEEPING
+------------------
+Check inventory, stash/body, trade with items in baskets, Shift release,
+repeated disassembly (animations on/off), all corpse modes, favorites/junk,
+equipment changes, stacked loot tint, and addon changes with empty slots.
+Test MCM switches while work is pending. Close/reopen and change partners.
+If sorting stops after a renderer error, reopen the inventory and check the
+game log for "[Seamless Inventory Sort]". Keep the previous build for rollback.
+
+The repository README and docs/TESTING.md contain full test and build details.
 
 CREDITS
 -------
-  SortingPlus / MCM           -- RavenAscendant
-  Inventory Open Lag Reducer  -- sea-ex
-  FastTransfer                -- Ishmaeel
-  Looting Takes Time (Redux)  -- its respective author
-
-================================================================================
+SortingPlus / MCM: RavenAscendant
+Inventory Open Lag Reducer: sea-ex
+FastTransfer: Ishmaeel
+Looting Takes Time (Redux): its respective author

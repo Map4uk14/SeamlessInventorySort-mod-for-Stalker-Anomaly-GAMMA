@@ -25,7 +25,7 @@
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_win_loot"><text>Seamless Sort in loot / stash window</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_win_loot_desc">
-		<text>Keep both sides sorted while looting bodies, stashes and containers. Turn off to leave the loot screen unsorted as you take and drop items. (The body and Looting Takes Time options on the next page still apply.)</text>
+		<text>Keep both sides sorted while looting bodies, stashes and containers. Turn off to disable this mod's automatic loot-window sorting, including its corpse-specific layout override. SortingPlus and other mods keep their own behavior.</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_win_trade"><text>Seamless Sort in trade window</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_win_trade_desc">
@@ -33,7 +33,7 @@
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk"><text>Re-sort on favorite / junk</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_fav_junk_desc">
-		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), snap it to the top / bottom instantly in place. When off, SortingPlus' own behavior is used.</text>
+		<text>When you mark an item favorite or junk (SortingPlus K / J keys or the right-click menu), re-sort it in place. Shift, disassembly and corpse/reveal rules still apply. When off, SortingPlus' own behavior is used.</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump"><text>Keep modified weapons in the bag</text></string>
 	<string id="ui_mcm_seamless_sort_siss_general_no_slot_jump_desc">
@@ -63,7 +63,7 @@
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_keep_disasm"><text>Keep the bag still when disassembling</text></string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_keep_disasm_desc">
-		<text>While you disassemble, nothing in the bag moves: the dismantled item's slot stays empty and the resulting parts land at the end, so disassembling in quick succession never makes the inventory jump. When you stop, a single re-sort folds the parts into their group and closes the gaps -- the slider below sets how long it waits. Works on its own -- it does not need "Keep gaps after removing items".</text>
+		<text>Pause this mod's automatic sorting while disassembly parts arrive, then settle once after the configured delay. Repeated disassembly extends the hold. Stock item placement and other mods remain active. Works independently of "Keep gaps after removing items".</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_disasm_delay"><text>Re-sort delay after disassembling (sec)</text></string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_disasm_delay_desc">
@@ -71,23 +71,23 @@
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_ammo_parts_row"><text>Own category for ammo parts</text></string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_ammo_parts_row_desc">
-		<text>Sort casings, bullets and gunpowder (Ammo Maker parts) into their own group right below the ammo instead of mixing them in between the ammo boxes. Takes effect the next time a bag is sorted (reopen the inventory).</text>
+		<text>Sort casings, bullets and gunpowder (Ammo Maker parts) into their own group right below the ammo instead of mixing them in between the ammo boxes. Requests a sort when settings are applied, subject to the active sorting gates.</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_ap_order"><text>Ammo parts sort position</text></string>
 	<string id="ui_mcm_seamless_sort_siss_gaps_ap_order_desc">
-		<text>Where the ammo parts category sits in the overall sort order, on SortingPlus' scale where ammo is 9 and mutant parts are 10. Default 9.5 puts ammo parts right below the ammo. Lower moves them up (toward weapons and armor), higher moves them down (toward food and junk). Only matters when "Own category for ammo parts" is on. Takes effect on the next sort (reopen the inventory).</text>
+		<text>Where the ammo parts category sits in the overall sort order, on SortingPlus' scale where ammo is 9 and mutant parts are 10. Default 9.5 puts ammo parts right below the ammo. Lower moves them up (toward weapons and armor), higher moves them down (toward food and junk). Only matters when "Own category for ammo parts" is on. Requests a sort when settings are applied, subject to the active sorting gates.</text>
 	</string>
 
 	<!-- Looting and Bodies -->
 	<string id="ui_mcm_seamless_sort_siss_loot_desc">
-		<text>How looted dead bodies are handled. Only dead bodies are affected on this page; stashes, containers and your own inventory always sort.</text>
+		<text>How looted dead bodies are handled. Only dead bodies are affected on this page; stashes, containers and your own inventory follow the normal window settings.</text>
 	</string>
 	<string id="ui_mcm_seamless_sort_siss_loot_body_mode"><text>Looted body handling</text></string>
 	<string id="ui_mcm_seamless_sort_siss_loot_body_mode_desc">
-		<text>What to do with a looted dead body's items. Only dead bodies are affected; stashes, containers, companions and your own bag always sort.\n\n- Sort normally: sort the body like any container.\n- Never sort - keep as found: leave the body unsorted (size-kind layout), the same as SortingPlus' "sort npc inventories" off, but for corpses only. No Looting Takes Time needed.\n- Keep Looting Takes Time order: never sort; leave the body exactly in the order Looting Takes Time revealed it. (Looting Takes Time only; behaves like "Sort normally" without it.)\n- Sort after Looting Takes Time reveal: wait for the reveal to finish, then sort once and keep it sorted as you loot. (Looting Takes Time only.)</text>
+		<text>What to do with a looted dead body's items. Only dead bodies are affected; other inventories follow the normal window settings.\n\n- Sort normally: sort the body like any container.\n- Stock size-kind layout: use the same opening layout as SortingPlus' "sort npc inventories" off, then skip this mod's automatic re-sorts. This is not raw engine item order. No Looting Takes Time needed.\n- Keep Looting Takes Time order: skip this mod's automatic re-sorts and leave layout management to Looting Takes Time. (Looting Takes Time only; behaves like "Sort normally" without it.)\n- Sort after Looting Takes Time reveal: wait for the reveal to finish, then sort once and keep it sorted as you loot. (Looting Takes Time only.)</text>
 	</string>
 	<string id="seamless_sort_siss_loot_body_mode_lst_sort"><text>Sort normally</text></string>
-	<string id="seamless_sort_siss_loot_body_mode_lst_never"><text>Never sort - keep as found</text></string>
+	<string id="seamless_sort_siss_loot_body_mode_lst_never"><text>Stock size-kind layout (no auto-sort)</text></string>
 	<string id="seamless_sort_siss_loot_body_mode_lst_ltt_keep"><text>Keep Looting Takes Time order</text></string>
 	<string id="seamless_sort_siss_loot_body_mode_lst_ltt_after"><text>Sort after Looting Takes Time reveal</text></string>
 

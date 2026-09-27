@@ -1,0 +1,171 @@
+-- Session-owned inventory state and one coalescing scheduler for every sort.
+function new(config, policy, sorter, env)
+    local opt = config.get
+    local states, armed, epoch, sequence = {}, false, 0, 0
+    local counts = { sorted = 0, unchanged = 0, deferred = 0, failed = 0 }
+    local api = {}
+
+    local function remember(state, cc)
+        local ids, parents, positions, count = {}, {}, {}, 0
+        for id, index in pairs(cc.indx_id) do
+            local cell = cc.cell[index]
+            ids[id], parents[id], count = index, cell and cell.ID or false, count + 1
+            if opt("keep_gaps") and cell and cell.ID == id and cell.area then
+                positions[id] = { x = cell.area.x, y = cell.area.y }
+            end
+        end
+        state.ids, state.parents, state.positions, state.count = ids, parents, positions, count
+    end
+    local function difference(state, cc)
+        if not state.ids then return "changed" end
+        local count = 0
+        for id, index in pairs(cc.indx_id) do
+            local cell = cc.cell[index]
+            local parent = cell and cell.ID or false
+            if state.ids[id] ~= index or state.parents[id] ~= parent then return "changed" end
+            if opt("keep_gaps") and parent == id then
+                local before, after = state.positions[id], cell.area
+                if not before or not after or before.x ~= after.x or before.y ~= after.y then
+                    return "changed"
+                end
+            end
+            count = count + 1
+        end
+        return count == state.count and "unchanged" or "removed"
+    end
+    local function valid(cc, state)
+        return env.menu() == state.menu and state.menu.CC[cc.ID] == cc and cc:IsShown()
+            and (not state.menu.GetPartner or state.menu:GetPartner() == state.partner)
+    end
+    local function state_for(menu, cc)
+        local state = states[cc]
+        local partner = menu.GetPartner and menu:GetPartner()
+        if not state or state.menu ~= menu or state.partner ~= partner then
+            state = { menu = menu, partner = partner, failures = 0 }
+            states[cc] = state
+        end
+        return state
+    end
+
+    local function drain(cc, state, position)
+        if not state.pending or state.sorting or state.suspended then return false end
+        if not valid(cc, state) then states[cc] = nil; return false end
+        local gate = policy.gate(state.menu, cc, state)
+        if gate == "skip" then
+            state.pending, state.force = false, false
+            remember(state, cc)
+            return false
+        end
+        local now = env.now()
+        if gate == "wait" or now < (state.retry_at or 0)
+                or (opt("osc_guard") and now < (state.cooldown or 0)) then return false end
+        if not state.force then
+            local change = difference(state, cc)
+            if change == "unchanged" or (change == "removed" and opt("keep_gaps")) then
+                state.pending = false
+                remember(state, cc)
+                return false
+            end
+        end
+        position = position or env.scroll(cc)
+        state.sorting = true
+        local result = sorter.sort(cc)
+        state.sorting = false
+        if not result.ok then
+            state.failures = state.failures + 1
+            counts.failed = counts.failed + 1
+            state.retry_at = now + 1000
+            env.report("sort:" .. cc.ID, result.error)
+            if result.rollback_ok == false or state.failures >= 3 then
+                state.suspended, state.pending = true, false
+                env.report("suspended:" .. cc.ID, "reopen this inventory to retry")
+            end
+            return false
+        end
+        state.pending, state.force, state.failures = false, false, 0
+        remember(state, cc)
+        if not result.skipped then counts.sorted = counts.sorted + 1 end
+        if result.moved then
+            if position ~= nil then env.restore_scroll(cc, position) end
+            env.moved(state.menu, cc)
+            if opt("osc_guard") then
+                if not state.window or now - state.window >= 1000 then
+                    state.window, state.sorts = now, 0
+                end
+                state.sorts = state.sorts + 1
+                if state.sorts >= opt("osc_limit") then
+                    state.cooldown = now + opt("osc_cooldown") * 1000
+                    state.window = nil
+                end
+            end
+        end
+        return result.moved
+    end
+
+    local function schedule()
+        if armed then return end
+        local pending = false
+        for _, state in pairs(states) do if state.pending then pending = true; break end end
+        if not pending then return end
+        armed, sequence = true, sequence + 1
+        local generation, next_poll = epoch, 0
+        env.schedule("siss_sort_" .. sequence, function()
+            if epoch ~= generation then return true end
+            local now = env.now()
+            if now < next_poll then return false end
+            next_poll = now + 50
+            local remaining = false
+            for cc, state in pairs(states) do
+                if state.pending then
+                    local ok, error_text = pcall(drain, cc, state)
+                    if not ok then
+                        state.pending, state.suspended = false, true
+                        env.report("scheduler:" .. cc.ID, error_text)
+                    end
+                    if states[cc] == state and state.pending then remaining = true end
+                end
+            end
+            if not remaining then armed = false; return true end
+            return false
+        end)
+    end
+
+    function api.reset(menu, cc)
+        if not cc then return end
+        states[cc] = nil -- callbacks from the old layout have no state to act on
+        local state = state_for(menu, cc)
+        remember(state, cc)
+        -- LTT's initial reveal may already have work pending before a refresh.
+        if policy.gate(menu, cc, state) == "wait" then
+            state.pending, state.force = true, true
+            schedule()
+        end
+    end
+    function api.refresh(menu, cc, position, force)
+        if not cc or not cc:IsShown() then return false end
+        local state = state_for(menu, cc)
+        if state.sorting or state.suspended then return false end
+        local change = difference(state, cc)
+        if not force and not state.pending and change == "unchanged" then
+            counts.unchanged = counts.unchanged + 1
+            return false
+        end
+        state.force = state.force or force or false
+        state.pending = true
+        -- Frozen disassembly/reveal layouts need a settle sort even if their
+        -- final membership equals the original or keep-gaps is enabled.
+        if policy.gate(menu, cc, state) == "wait" then state.force = true end
+        local moved = drain(cc, state, position)
+        if state.pending then counts.deferred = counts.deferred + 1; schedule() end
+        return moved
+    end
+    function api.clear()
+        epoch, states, armed = epoch + 1, {}, false
+    end
+    function api.stats()
+        local out = {}
+        for key, value in pairs(counts) do out[key] = value end
+        return out
+    end
+    return api
+end

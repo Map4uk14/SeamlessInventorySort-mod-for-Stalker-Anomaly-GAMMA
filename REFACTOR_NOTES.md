@@ -1,5 +1,7 @@
 # Core rebuild review notes
 
+Historical notes for the earlier core-rebuild branch. For the newer modular experiment, see [architecture](docs/ARCHITECTURE.md) and [testing](docs/TESTING.md). The checks described below apply to the historical version, not the current test suite.
+
 Branch: `refactor/core-rebuild`
 
 This is an experimental rebuild for review and in-game testing before merge.

@@ -1,0 +1,71 @@
+-- Loot marks belong to one open inventory session, including stacked children.
+function new(config, env)
+    local seen, marked, parents = nil, {}, {}
+    local color
+    local api = {}
+    function api.clear() seen, marked, parents = nil, {}, {} end
+    function api.options()
+        color = env.color(config.get("hl_new_a"), config.get("hl_new_r"),
+                          config.get("hl_new_g"), config.get("hl_new_b"))
+        if not config.get("enable") or not config.get("hl_new") then api.clear() end
+    end
+    function api.baseline(cc)
+        seen = seen or {}
+        if cc and cc.indx_id then
+            for id in pairs(cc.indx_id) do seen[id] = true end
+        end
+    end
+    function api.begin(cc)
+        api.clear()
+        if not config.get("enable") or not config.get("hl_new") then return end
+        -- Storage initialization can clear/repopulate the UI over several
+        -- refreshes. Ownership, not currently painted cells, defines old loot.
+        if env.owned_ids then
+            local ok, ids = pcall(env.owned_ids)
+            if ok and type(ids) == "table" then seen = ids end
+            -- On failure leave the baseline unknown, not falsely empty. The
+            -- first populated reset/refresh will establish a safe fallback.
+            return
+        end
+        api.baseline(cc)
+    end
+    function api.detect(cc)
+        if not (config.get("enable") and config.get("hl_new") and cc) then return false end
+        if not seen then api.baseline(cc); return false end
+        local changed = false
+        for id in pairs(cc.indx_id) do
+            if not seen[id] then seen[id], marked[id], changed = true, true, true end
+        end
+        local next_parents = {}
+        for id in pairs(marked) do
+            local index = cc.indx_id[id]
+            local cell = index and cc.cell[index]
+            if cell and cell.ID then next_parents[cell.ID] = true
+            else marked[id] = nil end
+        end
+        local removed = {}
+        for id in pairs(parents) do if not next_parents[id] then changed = true; removed[id] = true end end
+        for id in pairs(next_parents) do if not parents[id] then changed = true end end
+        parents = next_parents
+        for id in pairs(removed) do
+            local index = cc.indx_id[id]
+            local cell = index and cc.cell[index]
+            if cell and cell.Highlight then pcall(cell.Highlight, cell, false) end
+        end
+        return changed
+    end
+    function api.repaint(cc)
+        if not cc then return end
+        for id in pairs(parents) do
+            local index = cc.indx_id[id]
+            local cell = index and cc.cell[index]
+            if cell and cell.Highlight then pcall(cell.Highlight, cell, false) end
+        end
+    end
+    function api.highlight(cell)
+        if config.get("enable") and config.get("hl_new") and cell and cell.container
+                and cell.container.ID == "actor_bag" and parents[cell.ID] then return color end
+    end
+    api.options()
+    return api
+end

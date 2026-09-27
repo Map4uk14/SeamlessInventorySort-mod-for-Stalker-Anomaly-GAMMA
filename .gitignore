@@ -1,1 +1,5 @@
 Issues_TODO.txt
+packages/
+.venv/
+__pycache__/
+*.pyc

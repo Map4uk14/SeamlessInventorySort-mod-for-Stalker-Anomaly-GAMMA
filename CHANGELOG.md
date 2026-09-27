@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased - modular architecture experiment
+
+### Changed
+
+- Replaced the monolith with nine closure-owned modules and two stable startup/MCM entry points; kept all 22 setting paths.
+- Unified sort gates and deferred scheduling for normal changes, favorites, compatible supplies, Shift, disassembly, and LTT.
+- Replaced aggregate fingerprints with exact ID/index/stack-parent snapshots.
+- Prepared compatible supplies before opening-time Reinit; unchanged menu shows no longer request another full redraw/sort.
+- Separated icon-only refreshes from favorite/junk mutations, including SortingPlus with RESORT disabled.
+- Isolated SortingPlus kind caches per container using an explicit engine unlocalizer; coalesced option application after other MCM listeners.
+
+### Fixed
+
+- A changing weapon whose ID/section is briefly unavailable now leaves the last valid compatible-supply snapshot intact until the next equipment event or menu opening. Empty slots still use explicit placeholders in the signature.
+- Fixed existing actor items all receiving the new-loot tint when storage opens with an empty or partially populated UI. The opening baseline now uses actor-owned IDs, including stack children; actual pickups still highlight.
+- Best-effort rollback now includes a cell whose renderer mutates before throwing or returning false. Failed rollback suspends sorting until reopening; other failures retry at most three times.
+- Stale queued work is invalidated on close, reset, partner/container replacement, and option changes.
+- The weapon guard recognizes scope parent/child sections and excludes equipped, foreign, unknown, and known preexisting bag weapons.
+- Loot highlighting handles an initially empty bag and newly stacked children, including removing a tint when the new child leaves.
+- Missing/unknown alive() results no longer classify containers as dead actors.
+- Zero-delay disassembly freezes the synchronous callback burst; newly hidden LTT items cannot reuse an old finished-reveal result.
+
+### Development
+
+- Added executable Lua 5.1 regression tests, pinned upstream sea-ex integration checks, a synthetic no-change workload, architecture notes, and an in-game checklist.
+- Added validated MO2 packaging with an explicit file allowlist and archive-content hashes. Previous archives are preserved.
+- This remains experimental: no claim of fixing the large-stash opening delay observed with the mod disabled.
+
 ## v1.2.3
 
 ### Added

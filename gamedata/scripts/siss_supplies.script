@@ -1,0 +1,94 @@
+-- Section caches and temporary classification; never changes saved favorites.
+function new(config, env)
+    local opt = config.get
+    local sections, signature, components, icons = {}, nil, {}, {}
+    local slots = { 1, 2, 3, 5 }
+    local bags = { actor_bag = true, npc_bag = true, actor_trade_bag = true, npc_trade_bag = true }
+    local own = { actor_bag = true, actor_trade_bag = true }
+    local params = { "scopes_sect", "silencer_name", "grenade_launcher_name" }
+    local api = {}
+    local function add(target, value)
+        if type(value) ~= "string" then return end
+        value = value:match("^%s*(.-)%s*$")
+        if value ~= "" and value ~= "none" then target[value] = true end
+    end
+    function api.allowed(cc)
+        return cc and bags[cc.ID] and (opt("auto_fav_own") or not own[cc.ID])
+    end
+    function api.refresh(force)
+        local weapons, parts = {}, { tostring(opt("enable")), tostring(opt("auto_fav")) }
+        for _, slot in ipairs(slots) do
+            local available, weapon = pcall(env.slot, slot)
+            if not available then return false end -- equipment is still changing
+            if weapon then
+                local stable, id, section = pcall(function()
+                    return weapon:id(), weapon:section()
+                end)
+                if not stable or id == nil or type(section) ~= "string" or section == "" then
+                    return false -- keep the last good snapshot until another event/open
+                end
+                weapons[#weapons + 1] = weapon
+                parts[#parts + 1] = tostring(id) .. ":" .. section
+            else parts[#parts + 1] = "-" end
+        end
+        local next_signature = table.concat(parts, "|")
+        if not force and signature == next_signature then return false end
+        local next_sections = {}
+        if opt("enable") and opt("auto_fav") then
+            for _, weapon in ipairs(weapons) do
+                if env.weapon(weapon) and not env.fake(weapon:section()) then
+                    local ok, ammo = pcall(env.ammo, weapon)
+                    if ok and type(ammo) == "table" then
+                        for sec in pairs(ammo) do add(next_sections, sec) end
+                    end
+                    local scopes = env.param(0, weapon:section(), "scopes")
+                    if type(scopes) == "string" then
+                        for sec in scopes:gmatch("[^,]+") do add(next_sections, sec) end
+                    end
+                    for _, param in ipairs(params) do
+                        local got, value = pcall(env.addon, weapon, param)
+                        if got then add(next_sections, value) end
+                    end
+                end
+            end
+        end
+        local changed = false
+        for sec in pairs(sections) do if not next_sections[sec] then changed = true; break end end
+        if not changed then
+            for sec in pairs(next_sections) do if not sections[sec] then changed = true; break end end
+        end
+        signature, sections = next_signature, next_sections
+        return changed -- forcing a scan does not imply that sorting changed
+    end
+    function api.kind(cc, sec, original)
+        if not opt("enable") then return original end
+        -- Explicit player choices retain precedence over inferred categories.
+        if original == "favorites" or original == "junk" or env.junk(sec) or env.favorite(sec) then return original end
+        if opt("auto_fav") and api.allowed(cc) and sections[sec] then return "favorites" end
+        if opt("ammo_parts_row") and type(sec) == "string" then
+            if components[sec] == nil then components[sec] = env.param(1, sec, "is_component") and true or false end
+            if components[sec] then return "ammo_parts" end
+        end
+        return original
+    end
+    function api.highlight(cell)
+        if opt("enable") and opt("auto_fav") and cell and api.allowed(cell.container)
+                and sections[cell.section] and not env.junk(cell.section) then return env.color end
+    end
+    function api.icon(cell, obj, sec)
+        sec = sec or (cell and cell.section)
+        if not api.highlight(cell) or env.favorite(sec) then return nil end
+        if icons[sec] == nil then
+            local ok, axis = pcall(env.axis, sec)
+            if ok and axis and axis.h then
+                icons[sec] = { texture = "ui\\sortingplus\\icon-favourite", x = 0,
+                               y = axis.h / 2 - 11, w = 15, h = 15 }
+            else icons[sec] = false end
+        end
+        return icons[sec] or nil
+    end
+    function api.clear()
+        sections, signature, components, icons = {}, nil, {}, {}
+    end
+    return api
+end

@@ -1,0 +1,76 @@
+-- Short-lived, target-family clone guard. Never capture unrelated empty slots
+-- when the wrapper cannot identify a player-owned bag weapon.
+function new(config, env, util)
+    local watched, armed, generation, sequence = {}, false, 0, 0
+    local depth = 0
+    local slots = { 1, 2, 3 }
+    local api = {}
+    function api.clear()
+        generation, watched, armed = generation + 1, {}, false
+    end
+    local function candidate(...)
+        for i = 1, select("#", ...) do
+            local obj = select(i, ...)
+            local ok, weapon = pcall(env.weapon, obj)
+            if ok and weapon and env.owned(obj) then
+                local empty = {}
+                for _, slot in ipairs(slots) do
+                    local current = env.slot(slot)
+                    if current and current:id() == obj:id() then return nil end
+                    if not current then empty[slot] = true end
+                end
+                local known = env.known_ids and env.known_ids() or {}
+                known[obj:id()] = true
+                return { slots = empty, known = known, family = env.family(obj:section()),
+                         deadline = env.now() + 3000 }
+            end
+        end
+    end
+    local function arm(target)
+        if not next(target.slots) then return end
+        watched[#watched + 1] = target
+        if armed then return end
+        armed, sequence = true, sequence + 1
+        local epoch = generation
+        env.schedule("siss_weapon_" .. sequence, function()
+            if epoch ~= generation then return true end
+            if not config.get("enable") or not config.get("no_slot_jump") or not env.open() then
+                api.clear(); return true
+            end
+            local now = env.now()
+            for i = #watched, 1, -1 do
+                local watch, moved = watched[i], false
+                if now < watch.deadline then
+                    for slot in pairs(watch.slots) do
+                        local obj = env.slot(slot)
+                        if obj and not watch.known[obj:id()] and env.family(obj:section()) == watch.family then
+                            env.ruck(obj)
+                            moved, watch.reclaimed = true, true
+                        end
+                    end
+                end
+                if moved then watch.stable = nil
+                elseif watch.reclaimed then watch.stable = watch.stable or now end
+                if now >= watch.deadline or (watch.stable and now - watch.stable >= 500) then
+                    table.remove(watched, i)
+                end
+            end
+            if #watched == 0 then armed = false; return true end
+            return false
+        end)
+    end
+    function api.wrap(original)
+        return function(...)
+            if depth > 0 or not config.get("enable") or not config.get("no_slot_jump") or not env.open() then
+                return original(...)
+            end
+            local ok, target = pcall(candidate, ...)
+            depth = depth + 1
+            local result = util.pack(pcall(original, ...))
+            depth = depth - 1
+            if result[1] and ok and target then arm(target) end
+            return util.result(result)
+        end
+    end
+    return api
+end

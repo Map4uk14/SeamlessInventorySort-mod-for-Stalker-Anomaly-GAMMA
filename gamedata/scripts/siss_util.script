@@ -1,0 +1,47 @@
+-- Wrapper infrastructure only. No game state or feature policy here.
+function pack(...) return { n = select("#", ...), ... } end
+
+function result(values)
+    if not values[1] then error(values[2], 0) end
+    return unpack(values, 2, values.n)
+end
+
+function context()
+    local current
+    return {
+        get = function() return current end,
+        call = function(value, fn, ...)
+            local previous = current
+            current = value
+            local values = pack(pcall(fn, ...))
+            current = previous
+            return result(values)
+        end,
+    }
+end
+
+function hooks(report)
+    local installed = setmetatable({}, { __mode = "k" })
+    return function(target, name, wrap)
+        if not target or type(target[name]) ~= "function" then return end
+        local known = installed[target]
+        if not known then known = {}; installed[target] = known end
+        if known[name] then
+            -- Another mod may wrap our wrapper. Rewrapping that chain on every
+            -- menu open duplicates hooks indefinitely; leave ownership alone.
+            return
+        end
+        local ok, fn = pcall(wrap, target[name])
+        if not ok then report("hook:" .. name, fn); return end
+        target[name], known[name] = fn, fn
+    end
+end
+
+function diagnostics(write)
+    local seen = {}
+    return function(key, message)
+        if seen[key] then return end
+        seen[key] = true
+        if write then pcall(write, "[Seamless Inventory Sort] " .. key .. ": " .. tostring(message)) end
+    end
+end

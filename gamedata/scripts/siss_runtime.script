@@ -1,0 +1,327 @@
+-- Composition root: game APIs stay here, decisions live in the small modules.
+function new(g)
+    local util, api = g.siss_util, {}
+    local report = util.diagnostics(g.printf)
+    local hook = util.hooks(report)
+    local config = g.siss_config.new(function(path)
+        return g.ui_mcm and g.ui_mcm.get and g.ui_mcm.get(path)
+    end)
+    local opt, scope = config.get, util.context()
+    local bags = { "actor_bag", "npc_bag", "actor_trade_bag", "npc_trade_bag" }
+    local open, started, active, dirty, queued, epoch, serial = false, false, nil, false, false, 0, 0
+    local options_queued = false
+    local kind_cache = setmetatable({}, { __mode = "k" })
+    local registered = setmetatable({}, { __mode = "k" })
+    local ranks = setmetatable({}, { __mode = "k" })
+    local function now() return g.time_global() end
+    local function menu() return g.GetActorMenu and g.GetActorMenu() end
+    local function actor() return g.db and g.db.actor end
+    local function slot(id) return actor() and actor():item_in_slot(id) end
+    local function param(kind, sec, key) return g.SYS_GetParam(kind, sec, key) end
+    local function invalidate() kind_cache = setmetatable({}, { __mode = "k" }) end
+    local function schedule(name, callback)
+        g.CreateTimeEvent(name, name, 0, function()
+            local ok, done = pcall(callback)
+            if not ok then report("event:" .. name, done); return true end
+            return done
+        end)
+    end
+    local function protected(key, fn, ...)
+        local result = util.pack(pcall(fn, ...))
+        if not result[1] then report(key, result[2]); return end
+        return unpack(result, 2, result.n)
+    end
+    local function scoped(cc, fn, ...)
+        local rax = g.zzz_rax_sortingplus_mcm
+        local previous = rax and rax.ab_k
+        -- Our engine unlocalizer exposes this cache. Bag categories must not leak.
+        if type(previous) == "table" and cc then
+            kind_cache[cc] = kind_cache[cc] or {}
+            rax.ab_k = kind_cache[cc]
+        end
+        local result = util.pack(pcall(scope.call, cc, fn, ...))
+        if type(previous) == "table" then rax.ab_k = previous end
+        return util.result(result)
+    end
+    local policy = g.siss_policy.new(config, {
+        now = now, invbox = function(obj) return g.IsInvbox and g.IsInvbox(obj) end,
+        animations = function() return g.actor_effects and g.actor_effects.is_animations_on
+            and g.actor_effects.is_animations_on() end,
+        shift = function() return g.key_state and g.DIK_keys and
+            (g.key_state(g.DIK_keys.DIK_LSHIFT) ~= 0 or g.key_state(g.DIK_keys.DIK_RSHIFT) ~= 0) end,
+        ltt = function() return g.zzzz_loot_searching and g.zzzz_loot_searching.is_item_hidden end,
+    })
+    local function marked(name, sec)
+        local rax = g.zzz_rax_sortingplus_mcm
+        return rax and rax[name] and rax[name](sec)
+    end
+    local supplies = g.siss_supplies.new(config, {
+        slot = slot, weapon = g.IsWeapon, param = param,
+        fake = function(sec) return g.IsItem("fake_ammo_wpn", sec) end,
+        ammo = function(w) return g.utils_item.get_ammo(nil, w:id(), true) end,
+        addon = function(w, key) return g.utils_item.get_wpn_param(w, w:section(), key) end,
+        axis = function(sec) return g.utils_xml.get_item_axis(sec) end,
+        favorite = function(sec) return marked("is_favorite", sec) end,
+        junk = function(sec) return marked("is_junk", sec) end,
+        color = g.GetARGB(50, 176, 238, 26),
+    })
+    local loot = g.siss_loot.new(config, {
+        color = g.GetARGB,
+        owned_ids = function()
+            local owner = actor()
+            if not owner then return nil end
+            local ids = {}
+            owner:iterate_inventory(function(_, obj) ids[obj:id()] = true end, nil)
+            return ids -- Includes stack children and equipment, not just UI parents.
+        end,
+    })
+    local sorter = g.siss_sort.new({
+        context = { call = scoped }, iter = g.spairs,
+        object = function(id) return g.level.object_by_id(id) end,
+        order = function(cc, items)
+            local seax = g.seax_sortingplus_opt_sort_by_kind
+            if seax and seax.sort_by_kind_factory then return seax.sort_by_kind_factory(items) end
+            return cc:GetSortMethod()
+        end,
+    })
+    local function scroll(cc)
+        return cc and cc:IsShown() and cc.scroll and cc.scroll:GetCurrentScrollPos() or nil
+    end
+    local controller = g.siss_controller.new(config, policy, sorter, {
+        menu = menu, now = now, schedule = schedule, report = report, scroll = scroll,
+        restore_scroll = function(cc, pos) cc:Scroll_SetPos(pos, true) end,
+        moved = function(self, cc) if self.mode == "loot" and cc.ID == "actor_bag" then loot.repaint(cc) end end,
+    })
+    local weapons = g.siss_weapons.new(config, {
+        weapon = g.IsWeapon, slot = slot, now = now, schedule = schedule,
+        open = function() return open and menu() == active end,
+        owned = function(obj) local parent = obj:parent()
+            return parent and actor() and parent:id() == actor():id() end,
+        family = function(sec) return param(0, sec, "parent_section") or sec end,
+        known_ids = function()
+            local ids, self = {}, menu()
+            for _, id in ipairs({ "actor_bag", "actor_trade_bag" }) do
+                local cc = self and self.CC and self.CC[id]
+                if cc and cc.indx_id then for item_id in pairs(cc.indx_id) do ids[item_id] = true end end
+            end
+            return ids
+        end,
+        ruck = function(obj) actor():move_to_ruck(obj) end,
+    }, util)
+    local function inject_rank()
+        local rax = g.zzz_rax_sortingplus_mcm
+        local order = rax and rax.item_order
+        if not order then return end
+        local owned = ranks[order]
+        if opt("enable") and opt("ammo_parts_row") then
+            if not owned then owned = { previous = order.ammo_parts }; ranks[order] = owned end
+            order.ammo_parts, owned.value = opt("ap_order"), opt("ap_order")
+        elseif owned then
+            if order.ammo_parts == owned.value then order.ammo_parts = owned.previous end
+            ranks[order] = nil
+        end
+    end
+    local function all(self, force)
+        local handled = false
+        if not self or not self.CC or not policy.window(self) then return false end
+        policy.apply_body(self)
+        for _, id in ipairs(bags) do
+            local cc = self.CC[id]
+            if cc and cc:IsShown() and (sorter.supported(cc)
+                    or (opt("body_mode") == "never" and policy.corpse(self, cc))) then
+                handled = true
+                controller.refresh(self, cc, nil, force)
+            end
+        end
+        return handled
+    end
+    local function repaint(self)
+        self:UnHighlight_All()
+        self:UpdateItems()
+        if self.mode == "loot" then loot.repaint(self.CC.actor_bag) end
+    end
+    local function equipment()
+        if queued then return end
+        queued, serial = true, serial + 1
+        local generation = epoch
+        schedule("siss_equipment_" .. serial, function()
+            if generation ~= epoch then return true end
+            queued = false
+            local changed = supplies.refresh(false)
+            local favorites = dirty
+            dirty = false
+            if changed or favorites then invalidate() end
+            local self = menu()
+            if open and self == active and (changed or (favorites and opt("fav_junk"))) then
+                repaint(self)
+                all(self, true)
+            end
+            return true
+        end)
+    end
+    local function clear()
+        epoch, queued, dirty = epoch + 1, false, false
+        controller.clear(); policy.clear(); weapons.clear(); loot.clear()
+    end
+    local function prepare(self, npc_only)
+        if not npc_only then
+            clear()
+            if self.mode == "loot" then loot.begin(self.CC.actor_bag) end
+        end
+        open, active = true, self
+        if supplies.refresh(false) then invalidate() end
+        policy.apply_body(self)
+    end
+    local function after_reset(self, reset_only, ids)
+        if reset_only then return end
+        if self.mode == "loot" then loot.baseline(self.CC.actor_bag) end
+        for _, id in ipairs(ids) do
+            local cc = self.CC[id]
+            if cc and cc.indx_id then controller.reset(self, cc) end
+        end
+    end
+    local function reset_wrapper(ids, loot_reset, npc_only)
+        return function(original) return function(self, ...)
+            protected("prepare", prepare, self, npc_only)
+            local result = util.pack(pcall(original, self, ...))
+            if result[1] then protected("reset", after_reset, self, loot_reset and select(1, ...), ids) end
+            return util.result(result)
+        end end
+    end
+    local function refresh_wrapper(ids)
+        return function(original) return function(self, ...)
+            local positions = {}
+            for _, id in ipairs(ids) do positions[id] = protected("scroll", scroll, self.CC[id]) end
+            protected("body", policy.apply_body, self)
+            local result = util.pack(pcall(original, self, ...))
+            if result[1] then
+                local changed = self.mode == "loot" and protected("loot", loot.detect, self.CC.actor_bag)
+                for _, id in ipairs(ids) do
+                    protected("refresh:" .. id, controller.refresh, self, self.CC[id], positions[id])
+                end
+                if changed then protected("highlight", loot.repaint, self.CC.actor_bag) end
+            end
+            return util.result(result)
+        end end
+    end
+    local function register(target, id, fn)
+        if not target or not target.register then return end
+        registered[target] = registered[target] or {}
+        if not registered[target][id] then target.register(id, fn); registered[target][id] = true end
+    end
+    function api.install()
+        local ui = g.ui_inventory and g.ui_inventory.UIInventory
+        local cell = g.utils_ui and g.utils_ui.UICellContainer
+        local actor_ids, loot_ids, trade_ids = { bags[1] }, { bags[1], bags[2] }, { bags[3], bags[4] }
+        hook(ui, "IMode_ResetInventories", reset_wrapper(actor_ids))
+        hook(ui, "LMode_ResetInventories", reset_wrapper(loot_ids, true))
+        hook(ui, "LMode_ResetNPCInventory", reset_wrapper({ bags[2] }, false, true))
+        hook(ui, "TMode_ResetInventories", reset_wrapper(trade_ids))
+        hook(ui, "IMode_RefreshInventories", refresh_wrapper(actor_ids))
+        hook(ui, "LMode_RefreshInventories", refresh_wrapper(loot_ids))
+        hook(ui, "TMode_RefreshInventories", refresh_wrapper(trade_ids))
+        for _, name in ipairs({ "Reinit", "GetSortOrder", "FindFreeCell" }) do
+            hook(cell, name, function(original) return function(self, ...) return scoped(self, original, self, ...) end end)
+        end
+        local function classify(original) return function(sec, ...)
+            return supplies.kind(scope.get(), sec, original(sec, ...))
+        end end
+        local rax = g.zzz_rax_sortingplus_mcm
+        hook(rax, "get_sort_kind", classify)
+        hook(g.seax_sortingplus_opt_sort_by_kind, "get_sort_kind", classify)
+        hook(rax, "loadsettings", function(original) return function(...)
+            local result = util.pack(pcall(original, ...))
+            if result[1] then invalidate(); protected("rank", inject_rank) end
+            return util.result(result)
+        end end)
+        for _, name in ipairs({ "set_favorite", "set_junk" }) do
+            hook(rax, name, function(original) return function(...)
+                local result = util.pack(pcall(original, ...))
+                if result[1] then dirty = true; protected("equipment", equipment) end
+                return util.result(result)
+            end end)
+        end
+        hook(g.rax_icon_layers, "refresh", function(original) return function(mode, ...)
+            local self = menu()
+            if self and opt("fav_junk") and policy.window(self) and (mode == 1 or dirty) then
+                dirty = false
+                invalidate()
+                local handled = protected("favorite refresh", function()
+                    repaint(self)
+                    return all(self, true)
+                end)
+                if handled then return end
+            end
+            return original(mode, ...)
+        end end)
+        for _, name in ipairs({ "attach_addon", "detach_addon" }) do hook(g.utils_item, name, weapons.wrap) end
+        for _, name in ipairs({ "attach_scope", "detach_scope" }) do hook(g.item_weapon, name, weapons.wrap) end
+        local function disassembly(original) return function(...)
+            policy.disassemble()
+            return original(...)
+        end end
+        for _, name in ipairs({ "disassembly_item", "disassembly_weapon", "disassembly_outfit" }) do
+            hook(g.item_parts, name, disassembly)
+        end
+        hook(g.ammo_maker, "breakdown", disassembly)
+        if started then
+            register(g.rax_persistent_highlight, "zz_seamless_new_loot", loot.highlight)
+            register(g.rax_persistent_highlight, "zz_siss_auto_favorite", supplies.highlight)
+            register(g.rax_icon_layers, "zz_siss_auto_favorite", supplies.icon)
+        end
+    end
+    function api.options(force)
+        local changed = config.refresh()
+        inject_rank()
+        if not changed and not force then return end
+        controller.clear(); weapons.clear(); invalidate(); loot.options()
+        supplies.refresh(true)
+        local self = menu()
+        if open and self == active then policy.apply_body(self); repaint(self); all(self, true) end
+    end
+    function api.show(name)
+        if name ~= "UIInventory" then return end
+        api.install()
+        local self = menu()
+        if not self then return end
+        open, active = true, self
+        -- prepare() normally collected supplies before stock Reinit.
+        equipment()
+    end
+    function api.hide(name)
+        if name ~= "UIInventory" then return end
+        open, active = false, nil
+        clear()
+    end
+    local function queue_options()
+        if options_queued then return end
+        options_queued, serial = true, serial + 1
+        -- SortingPlus also handles this callback and replaces ranks/sort modes.
+        -- Apply after all listeners, independent of callback registration order.
+        schedule("siss_options_" .. serial, function()
+            options_queued = false
+            api.options(true)
+            return true
+        end)
+    end
+    function api.start()
+        if started then return end
+        started = true
+        api.options(); api.install()
+        local callbacks = {
+            actor_on_first_update = function()
+                open, active = false, nil
+                clear(); supplies.clear(); invalidate(); api.options(); api.install(); equipment()
+            end,
+            actor_item_to_slot = equipment, actor_item_to_ruck = equipment, actor_on_item_drop = equipment,
+            GUI_on_show = api.show, GUI_on_hide = api.hide, on_option_change = queue_options,
+        }
+        for name, callback in pairs(callbacks) do
+            local key, fn = name, callback
+            g.RegisterScriptCallback(key, function(...) return protected("callback:" .. key, fn, ...) end)
+        end
+    end
+    api.stats = controller.stats
+    api.install()
+    return api
+end

@@ -1,0 +1,91 @@
+-- Existing-cell layout transaction. Dependencies are supplied by the adapter.
+-- No Reset/Reinit/AddItem/RemoveItem calls: stacking and trade ownership stay
+-- with the game. UI renderer rollback is best effort, not database atomicity.
+function new(deps)
+    local api = {}
+    function api.supported(cc)
+        return cc and cc.sort_method == "kind" and cc.indx_id and cc.cell
+            and cc.grid and cc.rKind and type(cc.GetSortMethod) == "function"
+            and type(cc.FindFreeCell) == "function" and deps.iter ~= nil
+    end
+
+    local function copy(t)
+        local out = {}
+        for key, value in pairs(t) do out[key] = value end
+        return out
+    end
+
+    local function run(cc)
+        local items, cells = {}, {}
+        -- Walk parent cells, not all child IDs, when preparing a sort.
+        for index, cell in pairs(cc.cell) do
+            local id = cell.ID
+            if id and cc.indx_id[id] == index then
+                local obj = deps.object(id)
+                if not obj then error("inventory object unavailable: " .. tostring(id)) end
+                items[#items + 1], cells[id] = obj, cell
+            end
+        end
+        if #items == 0 then return { ok = true, moved = false, cells = 0 } end
+        -- Comparator construction can fail without touching grid occupancy.
+        local compare, find = deps.order(cc, items)
+        local grid, kind, row, col, original_find = cc.grid, cc.rKind, cc.row_end, cc.col_end, cc.FindFreeCell
+        local scratch = {}
+        for r, columns in pairs(grid) do
+            scratch[r] = {}
+            for c in pairs(columns) do scratch[r][c] = true end
+        end
+        local function restore()
+            cc.grid, cc.rKind, cc.row_end, cc.col_end = grid, kind, row, col
+            cc.FindFreeCell = original_find
+        end
+        cc.grid, cc.rKind, cc.row_end, cc.col_end = scratch, copy(kind), 0, 0
+        cc.rKind.last, cc.rKind.current, cc.rKind.row = false, false, 1
+        if find then cc.FindFreeCell = find end
+        local plan = {}
+        local ok, reason = pcall(function()
+            for _, obj in deps.iter(items, compare) do
+                local area = cc:FindFreeCell(obj, obj:section())
+                if not area then error("item does not fit: " .. obj:section()) end
+                local cell = cells[obj:id()]
+                if not cell.area then error("parent cell has no area") end
+                local old = cell.area
+                if old.x ~= area.x or old.y ~= area.y or old.w ~= area.w or old.h ~= area.h then
+                    plan[#plan + 1] = { cell = cell, obj = obj, area = copy(area), old = copy(old) }
+                end
+            end
+        end)
+        local next_grid, next_kind, next_row, next_col = cc.grid, cc.rKind, cc.row_end, cc.col_end
+        restore()
+        if not ok then return { ok = false, error = reason, rollback_ok = true } end
+
+        local attempted = 0
+        cc.grid, cc.rKind, cc.row_end, cc.col_end = next_grid, next_kind, next_row, next_col
+        ok, reason = pcall(function()
+            for i, step in ipairs(plan) do
+                attempted = i -- include a cell that mutates and THEN throws
+                if step.cell:Set(step.obj, step.area) == false then error("cell renderer rejected item") end
+            end
+            if #plan > 0 then cc:Scroll_Reinit(true) end
+        end)
+        if not ok then
+            restore()
+            local recovered = true
+            for i = attempted, 1, -1 do
+                local step = plan[i]
+                local restored, accepted = pcall(step.cell.Set, step.cell, step.obj, step.old)
+                if not restored or accepted == false then recovered = false end
+            end
+            return { ok = false, error = reason, rollback_ok = recovered }
+        end
+        return { ok = true, moved = #plan > 0, cells = #items, repainted = #plan }
+    end
+
+    function api.sort(cc)
+        if not api.supported(cc) then return { ok = true, moved = false, skipped = true } end
+        local ok, result = pcall(deps.context.call, cc, run, cc)
+        if not ok then return { ok = false, error = result, rollback_ok = true } end
+        return result
+    end
+    return api
+end
